@@ -1,13 +1,13 @@
 #include "netstore.h"
 
-using namespace std;
-
 int main(int argc, char *argv[]) {
     std::string serverAddress, downloadFolder;
     int serverPort, timeout;
 
     try {
-        po::options_description desc(string(argv[0]).append(" options"));
+        namespace po = boost::program_options;
+
+        po::options_description desc(std::string(argv[0]).append(" options"));
         desc.add_options()
                 ("help,h", "help message")
                 (",g", po::value<std::string>(&serverAddress)->required(), "multicast address of servers")
@@ -19,12 +19,13 @@ int main(int argc, char *argv[]) {
         po::store(po::command_line_parser(argc, argv).options(desc)
                           .style(po::command_line_style::unix_style | po::command_line_style::allow_long_disguise)
                           .run(), vm);
-        po::notify(vm);
 
         if (vm.count("help")) {
-            cout << desc << "\n";
+            std::cout << desc << "\n";
             return 0;
         }
+        po::notify(vm);
+
 
         if (!(std::regex_match(serverAddress, std::regex(IPV4_REGEXP)))) {
             throw std::invalid_argument("Server address is not a valid ipv4 address");
@@ -36,8 +37,8 @@ int main(int argc, char *argv[]) {
             throw std::invalid_argument("Timeout is not valid");
         }
     }
-    catch (exception &e) {
-        cerr << "error: " << e.what() << "\n";
+    catch (std::exception &e) {
+        std::cerr << "error: " << e.what() << "\n";
         return 1;
     }
 
