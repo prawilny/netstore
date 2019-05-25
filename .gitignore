@@ -1,0 +1,7 @@
+.idea
+cmake-build-debug
+CMakeLists.txt
+netstore-client
+netstore-client.o
+netstore-server
+netstore-server.o
