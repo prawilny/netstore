@@ -1,13 +1,42 @@
 #include "netstore.h"
 
-struct client_config{
+#include <sstream> //?
+#include <unordered_map>
+
+enum class cmd_type {
+    discover,
+    search,
+    search_all,
+    search_regex,
+    fetch,
+    upload,
+    remove,
+    exit,
+    invalid
+};
+
+static std::unordered_map<std::string, cmd_type> command_types = {
+        {"discover", cmd_type::discover},
+        {"search",   cmd_type::search},
+        {"fetch",    cmd_type::fetch},
+        {"upload",   cmd_type::upload},
+        {"remove",   cmd_type::remove},
+        {"exit",     cmd_type::exit},
+};
+
+struct client_config {
     std::string server_address;
     int server_port;
     std::string download_folder;
     int timeout;
 };
 
-bool parse_commandline(struct client_config * config, int argc, char ** argv) {
+struct command {
+    cmd_type type;
+    std::string arg;
+};
+
+bool parse_commandline_args(struct client_config *config, int argc, char **argv) {
     try {
         namespace po = boost::program_options;
 
@@ -47,11 +76,66 @@ bool parse_commandline(struct client_config * config, int argc, char ** argv) {
     return true;
 }
 
+bool parse_command(struct command *c) {
+    std::string line, token;
+
+    if (!getline(std::cin, line)) {
+        std::cerr << "Error reading line\n";
+        return false;
+    }
+    std::istringstream linestream(line);
+
+    if (!(linestream >> token)) {
+        return false;
+    }
+    std::transform(token.begin(), token.end(), token.begin(), ::tolower);
+
+    c->type = cmd_type::invalid;
+    for (auto it = command_types.begin(); it != command_types.end(); it++) {
+        if (token.compare(it->first)) {
+            c->type = it->second;
+        }
+    }
+
+    int args = 0;
+    if (linestream >> token) {
+        args++;
+        c->arg = token;
+    }
+    if (linestream >> token) {
+        args++;
+    }
+
+    switch (c->type) {
+        case cmd_type::discover:
+        case cmd_type::exit:
+            return (args == 0 ? true : false);
+        case cmd_type::fetch:
+        case cmd_type::upload:
+        case cmd_type::remove:
+            return (args == 1 ? true : false);
+        case cmd_type::search:
+            switch (args) {
+                case 0:
+                    c->type = cmd_type::search_all;
+                    return true;
+                case 1:
+                    c->type = cmd_type::search_regex;
+                    return true;
+                default:
+                    return false;
+            }
+        default:
+            return false;
+    }
+}
+
 int main(int argc, char *argv[]) {
     struct client_config config;
+    std::vector<std::string> filenames;
 
-    if (!parse_commandline(&config, argc, argv)){
-         return 1;
+    if (!parse_commandline_args(&config, argc, argv)) {
+        return 1;
     }
 
     return 0;

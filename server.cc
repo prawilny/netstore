@@ -10,7 +10,7 @@ struct server_config {
     int timeout;
 };
 
-bool parse_commandline(struct server_config *config, int argc, char **argv) {
+bool parse_commandline_args(struct server_config *config, int argc, char **argv) {
     try {
         namespace po = boost::program_options;
 
@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
 
     std::vector<std::string> filenames;
 
-    if (!parse_commandline(&config, argc, argv)) {
+    if (!parse_commandline_args(&config, argc, argv)) {
         return 1;
     }
 
