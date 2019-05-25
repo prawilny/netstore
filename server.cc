@@ -132,11 +132,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (!index_files(filenames) {
+    if (!index_files(filenames)) {
         return 2;
     }
 
-    if ((sock = create_socket(&config)) == -1) {
+    if ((sock = create_socket()) == -1) {
         return 1;
     }
 
@@ -145,6 +145,6 @@ int main(int argc, char *argv[]) {
             std::cerr << "Partial read\n";
             continue;
         }
-        
+
     }
 }
