@@ -3,6 +3,8 @@
 #include <sstream> //?
 #include <unordered_map>
 
+static constexpr int MULTICAST_UDP_TTL_VALUE = 4;
+
 enum class cmd_type {
     discover,
     search,
@@ -55,7 +57,7 @@ bool parse_commandline_args(struct client_config *config, int argc, char **argv)
 
         if (vm.count("help")) {
             std::cout << desc << "\n";
-            return true;
+            exit(0);
         }
         po::notify(vm);
 
@@ -99,10 +101,10 @@ bool parse_command(struct command *c) {
     }
 
     int args = 0;
-    if (!linestream.eof()){
+    if (!linestream.eof()) {
         args++;
         linestream >> c->arg;
-        if (!linestream.eof()){
+        if (!linestream.eof()) {
             args++;
         }
     }
@@ -110,11 +112,11 @@ bool parse_command(struct command *c) {
     switch (c->type) {
         case cmd_type::discover:
         case cmd_type::exit:
-            return (args == 0 ? true : false);
+            return args == 0;
         case cmd_type::fetch:
         case cmd_type::upload:
         case cmd_type::remove:
-            return (args == 1 ? true : false);
+            return args == 1;
         case cmd_type::search:
             switch (args) {
                 case 0:
@@ -131,18 +133,83 @@ bool parse_command(struct command *c) {
     }
 }
 
+int create_socket(struct client_config *config) {
+    int sock;
+    struct sockaddr_in local_address;
+    struct sockaddr_in remote_address;
+
+    int broadcast_flag = 1;
+    int ttl_val = MULTICAST_UDP_TTL_VALUE;
+
+    if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+        std::cerr << "socket\n";
+        perror(NULL);
+        return -1;
+    }
+
+    struct timeval timeout;
+    timeout.tv_sec = config->timeout;
+    timeout.tv_usec = 0;
+
+    if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, (void *) &ttl_val, sizeof(ttl_val)) == -1
+        || setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (void *) &broadcast_flag, sizeof(broadcast_flag)) == -1
+        || setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (void *) &timeout, sizeof(timeout)) == -1) { //??
+        std::cerr << "setsockopt\n";
+        perror(NULL);
+        close(sock);
+        return -1;
+    }
+
+    local_address.sin_family = AF_INET;
+    local_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    local_address.sin_port = htons(0);
+    if (bind(sock, (struct sockaddr *) &local_address, sizeof(local_address)) == -1) {
+        std::cerr << "bind (local)\n";
+        perror(NULL);
+        close(sock);
+        return -1;
+    }
+
+    /*
+     *  optval = 0;
+     *  if (setsockopt(sock, SOL_IP, IP_MULTICAST_LOOP, (void*)&optval, sizeof optval) < 0)
+     *      syserr("setsockopt loop");
+     */
+
+    remote_address.sin_family = AF_INET;
+    remote_address.sin_port = htons(config->server_port);
+    if (inet_aton(config->server_address.c_str(), &remote_address.sin_addr) == 0) {
+        std::cerr << "bind (remote)\n";
+        perror(NULL);
+        close(sock);
+        return -1;
+    }
+
+    if (connect(sock, (struct sockaddr *) &remote_address, sizeof(remote_address)) == -1) {
+        std::cerr << "connect\n";
+        perror(NULL);
+        close(sock);
+        return -1;
+    }
+
+    return sock;
+}
+
 int main(int argc, char *argv[]) {
     struct client_config config;
     struct command cmd;
     std::vector<std::string> filenames;
+    int sock;
 
     if (!parse_commandline_args(&config, argc, argv)) {
         return 1;
     }
 
-    for (;;){
-        parse_command(&cmd);
+    if ((sock = create_socket(&config)) == -1) {
+        return 1;
     }
 
-    return 0;
+    for (;;) {
+        parse_command(&cmd);
+    }
 }

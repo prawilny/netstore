@@ -31,7 +31,7 @@ bool parse_commandline_args(struct server_config *config, int argc, char **argv)
 
         if (vm.count("help")) {
             std::cout << desc << "\n";
-            return true;
+            exit(0);
         }
         po::notify(vm);
 
@@ -76,9 +76,48 @@ bool index_files(std::vector<std::string> &names, std::filesystem::path path, ui
     return true;
 }
 
-int main(int argc, char *argv[]) {
-    struct server_config config;
+int create_socket(struct server_config *config) {
+    int sock;
+    struct sockaddr_in local_address;
+    struct ip_mreq ip_mreq;
 
+    if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+        std::cerr << "socket\n";
+        perror(NULL);
+        return -1;
+    }
+
+    ip_mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    if (inet_aton(config->server_address.c_str(), &ip_mreq.imr_multiaddr) == 0){
+        std::cerr << "inet_aton\n";
+        perror(NULL);
+        close(sock);
+        return -1;
+    }
+
+    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *) &ip_mreq, sizeof (ip_mreq)) == -1) {
+        std::cerr << "setsockopt\n";
+        perror(NULL);
+        close(sock);
+        return -1;
+    }
+
+    local_address.sin_family = AF_INET;
+    local_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    local_address.sin_port = htons(config->server_port);
+    if (bind(sock, (struct sockaddr *) &local_address, sizeof (local_address)) < 0) {
+        std::cerr << "bind\n";
+        perror(NULL);
+        close(sock);
+        return -1;
+    }
+
+    return sock;
+}
+
+int main(int argc, char *argv[]) {
+    int sock;
+    struct server_config config;
     std::vector<std::string> filenames;
 
     if (!parse_commandline_args(&config, argc, argv)) {
@@ -87,6 +126,10 @@ int main(int argc, char *argv[]) {
 
     if (!index_files(filenames, config.shared_folder, &config.free_space)) {
         return 2;
+    }
+
+    if ((sock = create_socket(&config)) == -1) {
+        return 1;
     }
 
     return 0;

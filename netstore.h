@@ -9,6 +9,9 @@
 #include <filesystem>
 #include <algorithm>
 #include <cassert>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 static constexpr int DEFAULT_TIMEOUT = 5;
 static constexpr int MAX_TIMEOUT = 300;
@@ -21,7 +24,7 @@ static constexpr int CMD_LEN = 10;
 static constexpr int SIMPL_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN * sizeof(char) - sizeof(uint64_t);
 static constexpr int CMPLX_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN * sizeof(char) - sizeof(uint64_t) - sizeof(uint64_t);
 
-static std::string MSG_HELLO = "HELLO\0\0\0\0\0";
+static constexpr const char* MSG_HELLO = "HELLO\0\0\0\0\0";
 
 struct SIMPL_CMD {
     char cmd[CMD_LEN];
