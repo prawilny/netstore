@@ -92,18 +92,19 @@ bool parse_command(struct command *c) {
 
     c->type = cmd_type::invalid;
     for (auto it = command_types.begin(); it != command_types.end(); it++) {
-        if (token.compare(it->first)) {
+        if (token.compare(it->first) == 0) {
             c->type = it->second;
+            break;
         }
     }
 
     int args = 0;
-    if (linestream >> token) {
+    if (!linestream.eof()){
         args++;
-        c->arg = token;
-    }
-    if (linestream >> token) {
-        args++;
+        linestream >> c->arg;
+        if (!linestream.eof()){
+            args++;
+        }
     }
 
     switch (c->type) {
@@ -132,10 +133,15 @@ bool parse_command(struct command *c) {
 
 int main(int argc, char *argv[]) {
     struct client_config config;
+    struct command cmd;
     std::vector<std::string> filenames;
 
     if (!parse_commandline_args(&config, argc, argv)) {
         return 1;
+    }
+
+    for (;;){
+        parse_command(&cmd);
     }
 
     return 0;
