@@ -157,7 +157,7 @@ int create_socket() {
 
     if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, (void *) &ttl_val, sizeof(ttl_val)) == -1
         || setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (void *) &broadcast_flag, sizeof(broadcast_flag)) == -1
-        || setsockopt(sock, SOL_IP, IP_MULTICAST_LOOP, (void *) &mcast_loop_flag, sizeof mcast_loop_flag) < 0) {
+        || setsockopt(sock, SOL_IP, IP_MULTICAST_LOOP, (void *) &mcast_loop_flag, sizeof mcast_loop_flag) < 0) { //TODO?
         std::cerr << "setsockopt\n";
         perror(NULL);
         close(sock);
@@ -205,20 +205,22 @@ void do_discover(int socket) {
     simple.cmd_seq = htobe64(seq);
     memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
 
-    if (cmd_send(socket, &simple, &remote_multicast_address)) {
-        std::cerr << "Couldn't send HELLO message\n";
+    std::cout<< "do_discover()\n";
+    if (!cmd_send(socket, &simple, &remote_multicast_address)) {
+        perror("Couldn't send HELLO message");
         return;
     }
+    std::cout<< "HELLO sent\n";
 
     while (cmd_recvfrom_timed(socket, &complex, &server_address, &timeout)) {
         if (be64toh(complex.cmd_seq) != seq || strncmp(MSG_HEADER_GOOD_DAY, complex.cmd, CMD_LEN) != 0) {
-            std::cerr << "[PCKG ERROR]  Skipping invalid package from {" << server_address.sin_addr.s_addr << "}:{"
-                      << server_address.sin_port << "}." << std::endl;
+            pckg_error(&server_address);
             continue;
         }
         std::cout << "Found " << server_address.sin_addr.s_addr << "(" << config.server_port << ") with free space "
                   << be64toh(complex.param) << std::endl;
     }
+    std::cout<< "do_discover() returns\n";
 }
 
 void execute_command(struct command *cmd, int socket) {

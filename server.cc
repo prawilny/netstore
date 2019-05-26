@@ -2,6 +2,15 @@
 
 static constexpr int DEFAULT_FREE = 52428800;
 
+enum class req_type {
+    hello,
+    list,
+    upload,
+    download,
+    remove,
+    invalid
+};
+
 struct server_config {
     std::string server_address;
     int server_port;
@@ -14,7 +23,6 @@ struct server_config {
 struct server_config config;
 struct sockaddr_in local_address;
 struct sockaddr_in client_address;
-socklen_t client_size;
 
 bool parse_commandline_args(int argc, char **argv) {
     try {
@@ -121,12 +129,31 @@ int create_socket() {
     return sock;
 }
 
+bool do_hello(int sock, struct SIMPL_CMD * request){
+    struct CMPLX_CMD reply;
+
+    reply.cmd_seq = request->cmd_seq;
+    snprintf(reply.cmd, CMD_LEN, "%s", MSG_HEADER_GOOD_DAY);
+
+    return cmd_send(sock, &reply, &client_address);
+}
+
+req_type parse_req_type(struct BUF_CMD *buf) {
+    if (strncmp(buf->cmd, MSG_HEADER_HELLO, CMD_LEN) == 0) {
+        return req_type::hello;
+    }
+    /*if (strncmp(buf->cmd, ..., CMD_LEN) == 0) {
+        return req_type::hello;
+    }*/
+    return req_type::invalid;
+}
+
 int main(int argc, char *argv[]) {
     int sock;
     std::vector<std::string> filenames;
-    struct SIMPL_CMD simple;
-    struct CMPLX_CMD complex;
     struct BUF_CMD buffer;
+    struct SIMPL_CMD *buffer_simpl = (struct SIMPL_CMD *) &buffer;
+    struct CMPLX_CMD *buffer_cmplx = (struct CMPLX_CMD *) &buffer;
 
     if (!parse_commandline_args(argc, argv)) {
         return 1;
@@ -141,10 +168,20 @@ int main(int argc, char *argv[]) {
     }
 
     for (;;) {
-        if (recvfrom(sock, &buffer, UDP_DATA_SIZE, 0, (sockaddr *) &client_address, &client_size) != UDP_DATA_SIZE) {
+        if (!cmd_recvfrom(sock, &buffer, &client_address)) {
             std::cerr << "Partial read\n";
             continue;
         }
-
+        std::cout << "msg received\n";
+        switch(parse_req_type(&buffer)){
+            case req_type::hello:
+                if(!do_hello(sock, buffer_simpl)){
+                    std::cerr << "Error replying to hello\n";
+                }
+                break;
+            default:
+                pckg_error(&client_address);
+                break;
+        }
     }
 }
