@@ -1,6 +1,5 @@
 #include "netstore.h"
-
-static constexpr int DEFAULT_FREE = 52428800;
+#include "netstore-boost.h"
 
 enum class req_type {
     hello,
@@ -11,64 +10,14 @@ enum class req_type {
     invalid
 };
 
-struct server_config {
-    std::string server_address;
-    int server_port;
-    std::string shared_folder;
-    uint64_t free_space;
-    int timeout;
-};
-
 // global variables:
-struct server_config config;
+extern struct server_config s_config;
 struct sockaddr_in local_address;
 struct sockaddr_in client_address;
 
-bool parse_commandline_args(int argc, char **argv) {
-    try {
-        namespace po = boost::program_options;
-
-        po::options_description desc(std::string(argv[0]).append(" options"));
-        desc.add_options()
-                ("help,h", "help message")
-                (",g", po::value<std::string>(&config.server_address)->required(), "multicast address")
-                (",p", po::value<int>(&config.server_port)->required(), "udp port")
-                (",f", po::value<std::string>(&config.shared_folder)->required(), "shared folder")
-                (",t", po::value<int>(&config.timeout)->default_value(DEFAULT_TIMEOUT),
-                 "timeout for client connections")
-                (",b", po::value<uint64_t>(&config.free_space)->default_value(DEFAULT_FREE), "shared folder max size");
-
-        po::variables_map vm;
-        po::store(po::command_line_parser(argc, argv).options(desc)
-                          .style(po::command_line_style::unix_style | po::command_line_style::allow_long_disguise)
-                          .run(), vm);
-
-        if (vm.count("help")) {
-            std::cout << desc << "\n";
-            exit(0);
-        }
-        po::notify(vm);
-
-        if (!(std::regex_match(config.server_address, std::regex(IPV4_REGEXP)))) {
-            throw std::invalid_argument("Server address is not a valid ipv4 address");
-        }
-        if (config.server_port < 0 || MAX_PORT < config.server_port) {
-            throw std::invalid_argument("Server port is not valid");
-        }
-        if (config.timeout <= 0 || MAX_TIMEOUT < config.timeout) {
-            throw std::invalid_argument("Timeout is not valid");
-        }
-    }
-    catch (std::exception &e) {
-        std::cerr << "error: " << e.what() << "\n";
-        return false;
-    }
-    return true;
-}
-
 bool index_files(std::vector<std::string> &names) {
     namespace stdfs = std::filesystem;
-    std::filesystem::path path(config.shared_folder);
+    std::filesystem::path path(s_config.shared_folder);
 
     const stdfs::directory_iterator end{};
     try {
@@ -76,11 +25,11 @@ bool index_files(std::vector<std::string> &names) {
             if (stdfs::is_regular_file(*iter)) {
                 names.push_back(iter->path().string());
                 uint64_t fSize = iter->file_size();
-                if (fSize > config.free_space) {
+                if (fSize > s_config.free_space) {
                     std::cerr << "Shared folder's size exceeds limit\n";
                     return false;
                 }
-                config.free_space -= fSize;
+                s_config.free_space -= fSize;
             }
         }
     }
@@ -102,14 +51,14 @@ int create_socket() {
     }
 
     ip_mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-    if (inet_aton(config.server_address.c_str(), &ip_mreq.imr_multiaddr) == 0) {
+    if (inet_aton(s_config.server_address.c_str(), &ip_mreq.imr_multiaddr) == 0) {
         std::cerr << "inet_aton\n";
         perror(NULL);
         close(sock);
         return -1;
     }
 
-    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *) &ip_mreq, sizeof(ip_mreq)) == -1) {
+    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &ip_mreq, sizeof(ip_mreq)) == -1) {
         std::cerr << "setsockopt\n";
         perror(NULL);
         close(sock);
@@ -118,7 +67,7 @@ int create_socket() {
 
     local_address.sin_family = AF_INET;
     local_address.sin_addr.s_addr = htonl(INADDR_ANY);
-    local_address.sin_port = htons(config.server_port);
+    local_address.sin_port = htons((uint16_t) s_config.server_port);
     if (bind(sock, (struct sockaddr *) &local_address, sizeof(local_address)) < 0) {
         std::cerr << "bind\n";
         perror(NULL);
@@ -129,11 +78,12 @@ int create_socket() {
     return sock;
 }
 
-bool do_hello(int sock, struct SIMPL_CMD * request){
+bool do_hello(int sock, struct SIMPL_CMD *request) {
     struct CMPLX_CMD reply;
 
     reply.cmd_seq = request->cmd_seq;
     snprintf(reply.cmd, CMD_LEN, "%s", MSG_HEADER_GOOD_DAY);
+    reply.param = htobe64(s_config.free_space);
 
     return cmd_send(sock, &reply, &client_address);
 }
@@ -155,7 +105,7 @@ int main(int argc, char *argv[]) {
     struct SIMPL_CMD *buffer_simpl = (struct SIMPL_CMD *) &buffer;
     struct CMPLX_CMD *buffer_cmplx = (struct CMPLX_CMD *) &buffer;
 
-    if (!parse_commandline_args(argc, argv)) {
+    if (!parse_server_args(argc, argv)) {
         return 1;
     }
 
@@ -173,9 +123,9 @@ int main(int argc, char *argv[]) {
             continue;
         }
         std::cout << "msg received\n";
-        switch(parse_req_type(&buffer)){
+        switch (parse_req_type(&buffer)) {
             case req_type::hello:
-                if(!do_hello(sock, buffer_simpl)){
+                if (!do_hello(sock, buffer_simpl)) {
                     std::cerr << "Error replying to hello\n";
                 }
                 break;

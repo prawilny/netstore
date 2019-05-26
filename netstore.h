@@ -1,11 +1,9 @@
 #ifndef NETSTORE_NETSTORE_H
 #define NETSTORE_NETSTORE_H
 
-#include <boost/program_options.hpp>
 #include <iostream>
-#include <regex>
-#include <vector>
 #include <string>
+#include <vector>
 #include <filesystem>
 #include <algorithm>
 #include <cassert>
@@ -14,12 +12,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ctime>
-
-static constexpr int DEFAULT_TIMEOUT = 5;
-static constexpr int MAX_TIMEOUT = 300;
-static constexpr int MAX_PORT = 65535;
-
-std::string IPV4_REGEXP = "^(?:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])(\\.(?!$)|$)){4}$";
 
 static constexpr int UDP_DATA_SIZE = 65507;
 static constexpr int CMD_LEN = 10;
@@ -48,44 +40,16 @@ struct BUF_CMD {
     char data[BUF_CMD_DATA_SIZE];
 }__attribute__((packed));
 
-static_assert (sizeof(SIMPL_CMD) == UDP_DATA_SIZE);
-static_assert (sizeof(CMPLX_CMD) == UDP_DATA_SIZE);
-static_assert (sizeof(BUF_CMD) == UDP_DATA_SIZE);
+static_assert(sizeof(SIMPL_CMD) == UDP_DATA_SIZE);
+static_assert(sizeof(CMPLX_CMD) == UDP_DATA_SIZE);
+static_assert(sizeof(BUF_CMD) == UDP_DATA_SIZE);
 
-bool cmd_send(int socket, void *ptr, struct sockaddr_in *address) {
-    return sendto(socket, ptr, UDP_DATA_SIZE, 0, (const sockaddr *) address, sizeof(*address)) == UDP_DATA_SIZE;
-}
+bool cmd_send(int socket, void *ptr, struct sockaddr_in *address);
 
-bool cmd_recvfrom(int sock, void *buffer, struct sockaddr_in *from) {
-    socklen_t from_size = sizeof(*from);
-    ssize_t result = recvfrom(sock, buffer, UDP_DATA_SIZE, 0, (sockaddr *) from, &from_size) == UDP_DATA_SIZE;
-    return result == UDP_DATA_SIZE;
-}
+bool cmd_recvfrom(int sock, void *buffer, struct sockaddr_in *from);
 
-bool cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, struct timeval *timeout) {
-    struct timeval start, end, diff, left;
-    socklen_t from_size = sizeof(*from);
+bool cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, struct timeval *timeout);
 
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (void *) timeout, sizeof(*timeout)) == -1) {
-        return false;
-    }
-
-    gettimeofday(&start, NULL);
-    if (!cmd_recvfrom(sock, buffer, from)) {
-        return false;
-    }
-    gettimeofday(&end, NULL);
-
-    timersub(&end, &start, &diff);
-    timersub(timeout, &diff, &left);
-    *timeout = left;
-
-    return true;
-}
-
-void pckg_error(struct sockaddr_in *address) {
-    std::cerr << "[PCKG ERROR]  Skipping invalid package from {" << address->sin_addr.s_addr << "}:{"
-              << address->sin_port << "}." << std::endl;
-}
+void pckg_error(struct sockaddr_in *address);
 
 #endif //NETSTORE_NETSTORE_H

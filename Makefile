@@ -1,24 +1,23 @@
-FLAGS+= -Wall -Wextra -O2 -pedantic -std=c++17 -g
-BOOST= -lboost_program_options
-SERVER_LIBS= -lstdc++fs
+CXXFLAGS+= -Wall -Wextra -pedantic -std=c++17 -g #-O2
+LDLIBS= -lstdc++ -lstdc++fs  -lboost_program_options
 
 all: netstore-client netstore-server
 
-netstore-client: netstore-client.o
-	g++ netstore-client.o $(BOOST) -o netstore-client
+netstore-client: netstore-client.o netstore-boost.o netstore.o
 
-netstore-server: netstore-server.o
-	g++ netstore-server.o $(BOOST) $(SERVER_LIBS) -o netstore-server
+netstore-server: netstore-server.o netstore-boost.o netstore.o
 
-netstore-client.o: client.cc netstore.h
-	g++ $(FLAGS) client.cc -c -o netstore-client.o
+netstore-boost.o: netstore-boost.h
 
-netstore-server.o: server.cc netstore.h
-	g++ $(FLAGS) server.cc -c -o netstore-server.o
+netstore-client.o: netstore.h
+
+netstore-server.o: netstore.h
+
+netstore.o : netstore.h
 
 .PHONY : clean
 
-# -> $@ $@
+# -> $@ $^
 
 clean:
 	$(RM) netstore-server netstore-client *.o
