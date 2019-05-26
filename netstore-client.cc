@@ -38,7 +38,6 @@ extern struct client_config c_config;
 struct sockaddr_in local_address;
 struct sockaddr_in remote_multicast_address;
 
-
 bool parse_command(struct command *c) {
     std::string line, token;
 

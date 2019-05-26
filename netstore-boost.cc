@@ -14,7 +14,7 @@ bool parse_client_args(int argc, char **argv) {
     try {
         namespace po = boost::program_options;
 
-        po::options_description desc(std::string(argv[0]).append(" options"));
+        po::options_description desc("options");
         desc.add_options()
                 ("help,h", "help message")
                 (",g", po::value<std::string>(&c_config.server_address)->required(), "multicast address of servers")
@@ -54,7 +54,7 @@ bool parse_server_args(int argc, char **argv) {
     try {
         namespace po = boost::program_options;
 
-        po::options_description desc(std::string(argv[0]).append(" options"));
+        po::options_description desc("options");
         desc.add_options()
                 ("help,h", "help message")
                 (",g", po::value<std::string>(&s_config.server_address)->required(), "multicast address")
