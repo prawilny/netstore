@@ -90,7 +90,7 @@ bool do_hello(int sock, struct SIMPL_CMD *request) {
     struct CMPLX_CMD reply;
 
     reply.cmd_seq = request->cmd_seq;
-    snprintf(reply.cmd, CMD_LEN, "%s", MSG_HEADER_GOOD_DAY);
+    memcpy(reply.cmd, MSG_HEADER_GOOD_DAY, CMD_LEN);
     reply.param = htobe64(s_config.free_space);
 
     return cmd_send(sock, &reply, EMPTY_SIMPL_CMD_SIZE, &client_address);
@@ -114,9 +114,9 @@ bool do_remove(struct SIMPL_CMD *request, std::vector<std::string> &filenames) {
 }
 
 bool do_list(int sock, struct SIMPL_CMD *request, std::vector<std::string> filenames, bool filtered) {
-    struct SIMPL_CMD res;
-    snprintf(res.cmd, CMD_LEN, "%s", MSG_HEADER_MY_LIST);
-    res.cmd_seq = request->cmd_seq;
+    struct SIMPL_CMD reply;
+    memcpy(reply.cmd, MSG_HEADER_MY_LIST, CMD_LEN);
+    reply.cmd_seq = request->cmd_seq;
 
     if (filtered) {
         std::regex pattern(ANYTHING_REGEXP + std::string(request->data) + ANYTHING_REGEXP);
@@ -130,38 +130,38 @@ bool do_list(int sock, struct SIMPL_CMD *request, std::vector<std::string> filen
     std::sort(filenames.begin(), filenames.end());
 
     for (auto it = filenames.begin(); it != filenames.end();) {
-        memset(res.data, '\0', SIMPL_CMD_DATA_SIZE);
+        memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
         int left_space = SIMPL_CMD_DATA_SIZE;
 
         for (; it != filenames.end(); it++) {
             int filename_len = it->length() + 1;
             if (left_space < filename_len) {
-                if (!cmd_send(sock, &res, UDP_DATA_SIZE - left_space, &client_address)) {
+                if (!cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address)) {
                     return false;
                 }
                 break;
             }
 
-            snprintf(res.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len, "%s", it->c_str());
+            snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len, "%s", it->c_str());
             left_space -= filename_len;
-            res.data[SIMPL_CMD_DATA_SIZE - left_space - 1] = '\n';
+            reply.data[SIMPL_CMD_DATA_SIZE - left_space - 1] = '\n';
         }
-        return cmd_send(sock, &res, UDP_DATA_SIZE - left_space, &client_address); //added last filename to res
+        return cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address); //added last filename to reply
     }
 
     return true; //filenames.size() == 0
 }
 
 req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
-    if (strncmp(buf->cmd, MSG_HEADER_HELLO, CMD_LEN) == 0
+    if (memcmp(buf->cmd, MSG_HEADER_HELLO, CMD_LEN) == 0
         && msg_len == EMPTY_SIMPL_CMD_SIZE) {
         return req_type::hello;
     }
-    if (strncmp(buf->cmd, MSG_HEADER_DEL, CMD_LEN) == 0
+    if (memcmp(buf->cmd, MSG_HEADER_DEL, CMD_LEN) == 0
         && msg_len != EMPTY_SIMPL_CMD_SIZE) {
         return req_type::remove;
     }
-    if (strncmp(buf->cmd, MSG_HEADER_LIST, CMD_LEN) == 0) {
+    if (memcmp(buf->cmd, MSG_HEADER_LIST, CMD_LEN) == 0) {
         return (msg_len == EMPTY_SIMPL_CMD_SIZE ? req_type::list_all : req_type::list_exp);
     }
     return req_type::invalid;

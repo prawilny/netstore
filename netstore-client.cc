@@ -152,7 +152,7 @@ void do_discover(int socket) {
     timeout.tv_sec = c_config.timeout;
     timeout.tv_usec = 0;
 
-    snprintf(simple.cmd, CMD_LEN, "%s", MSG_HEADER_HELLO);
+    memcpy(simple.cmd, MSG_HEADER_HELLO, CMD_LEN);
     simple.cmd_seq = htobe64(seq);
     memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
 
@@ -178,11 +178,11 @@ void do_discover(int socket) {
 void do_remove(int socket, struct command *cmd) {
     struct SIMPL_CMD simple;
 
-    snprintf(simple.cmd, CMD_LEN, "%s", MSG_HEADER_DEL);
+    memcpy(simple.cmd, MSG_HEADER_DEL, CMD_LEN);
     simple.cmd_seq = htobe64((uint64_t) rand());
     snprintf(simple.data, SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
 
-    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE + cmd->arg.length() , &remote_multicast_address)) {
         perror("Couldn't send DEL message");
     }
 }
@@ -198,7 +198,7 @@ void do_search(int socket, struct command *cmd) {
     timeout.tv_sec = c_config.timeout;
     timeout.tv_usec = 0;
 
-    snprintf(simple.cmd, CMD_LEN, "%s", MSG_HEADER_LIST);
+    memcpy(simple.cmd, MSG_HEADER_LIST, CMD_LEN);
     simple.cmd_seq = htobe64(seq);
     memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
 
