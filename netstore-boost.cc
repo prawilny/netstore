@@ -3,7 +3,7 @@
 static constexpr int DEFAULT_TIMEOUT = 5;
 static constexpr int MAX_TIMEOUT = 300;
 static constexpr int MAX_PORT = 65535;
-std::string IPV4_REGEXP = "^(?:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])(\\.(?!$)|$)){4}$";
+static std::string IPV4_REGEXP = "^(?:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])(\\.(?!$)|$)){4}$";
 
 static constexpr int DEFAULT_SERVER_FREE = 52428800;
 

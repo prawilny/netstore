@@ -142,13 +142,13 @@ void do_exit() {
 }
 
 void do_discover(int socket) {
-    uint64_t seq;
+    uint64_t seq = (uint64_t) rand();
     struct SIMPL_CMD simple;
     struct CMPLX_CMD complex;
     struct sockaddr_in server_address;
     struct timeval timeout;
+    ssize_t rcvd;
 
-    seq = (uint64_t) rand();
     timeout.tv_sec = c_config.timeout;
     timeout.tv_usec = 0;
 
@@ -157,21 +157,75 @@ void do_discover(int socket) {
     memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
 
     std::cout << "do_discover()\n";
-    if (!cmd_send(socket, &simple, &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
         perror("Couldn't send HELLO message");
         return;
     }
     std::cout << "HELLO sent\n";
 
-    while (cmd_recvfrom_timed(socket, &complex, &server_address, &timeout)) {
+    while ((rcvd = cmd_recvfrom_timed(socket, &complex, &server_address, &timeout)) != -1) {
         if (be64toh(complex.cmd_seq) != seq || strncmp(MSG_HEADER_GOOD_DAY, complex.cmd, CMD_LEN) != 0) {
             pckg_error(&server_address);
             continue;
         }
-        std::cout << "Found " << inet_ntoa(server_address.sin_addr) << "(" << c_config.server_address << ") with free space "
+        std::cout << "Found " << inet_ntoa(server_address.sin_addr) << "(" << c_config.server_address
+                  << ") with free space "
                   << be64toh(complex.param) << std::endl;
     }
     std::cout << "do_discover() returns\n";
+}
+
+void do_remove(int socket, struct command *cmd) {
+    struct SIMPL_CMD simple;
+
+    snprintf(simple.cmd, CMD_LEN, "%s", MSG_HEADER_DEL);
+    simple.cmd_seq = htobe64((uint64_t) rand());
+    snprintf(simple.data, SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
+
+    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+        perror("Couldn't send DEL message");
+    }
+}
+
+void do_search(int socket, struct command *cmd) {
+    uint64_t seq = (uint64_t) rand();
+    struct SIMPL_CMD simple;
+    struct sockaddr_in server_address;
+    struct timeval timeout;
+    int msg_size = EMPTY_SIMPL_CMD_SIZE;
+    ssize_t rcvd;
+
+    timeout.tv_sec = c_config.timeout;
+    timeout.tv_usec = 0;
+
+    snprintf(simple.cmd, CMD_LEN, "%s", MSG_HEADER_LIST);
+    simple.cmd_seq = htobe64(seq);
+    memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
+
+    if (cmd->type == cmd_type::search_exp) {
+        snprintf(simple.data, SIMPL_CMD_DATA_SIZE, "%s", cmd->arg.c_str());
+        msg_size += std::min(SIMPL_CMD_DATA_SIZE, (int) cmd->arg.length());
+    }
+
+    std::cout << "do_search()\n";
+    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+        perror("Couldn't send LIST message");
+        return;
+    }
+    std::cout << "LIST sent\n";
+
+    while ((rcvd = cmd_recvfrom_timed(socket, &simple, &server_address, &timeout)) != -1) {
+        if (be64toh(simple.cmd_seq) != seq || strncmp(MSG_HEADER_MY_LIST, simple.cmd, CMD_LEN) != 0) {
+            pckg_error(&server_address);
+            continue;
+        }
+
+        simple.data[rcvd - CMD_LEN - sizeof(simple.cmd_seq)] = '\0';
+        for (char * token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
+            std::cout << "{" << token << "}" << "{" << inet_ntoa(server_address.sin_addr) << "}\n";
+        }
+    }
+    std::cout << "do_search() returns\n";
 }
 
 void execute_command(struct command *cmd, int socket) {
@@ -181,6 +235,14 @@ void execute_command(struct command *cmd, int socket) {
             break;
         case cmd_type::discover:
             do_discover(socket);
+            break;
+        case cmd_type::remove:
+            do_remove(socket, cmd);
+            break;
+        case cmd_type::search_all:
+        case cmd_type::search_exp:
+            do_search(socket, cmd);
+            break;
         default:
             return;
     }

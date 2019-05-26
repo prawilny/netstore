@@ -15,12 +15,17 @@
 
 static constexpr int UDP_DATA_SIZE = 65507;
 static constexpr int CMD_LEN = 10;
-static constexpr int SIMPL_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN * sizeof(char) - sizeof(uint64_t);
-static constexpr int CMPLX_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN * sizeof(char) - sizeof(uint64_t) - sizeof(uint64_t);
-static constexpr int BUF_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN * sizeof(char);
+static constexpr int SIMPL_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN - sizeof(uint64_t);
+static constexpr int CMPLX_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN - sizeof(uint64_t) - sizeof(uint64_t);
+static constexpr int BUF_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN;
+
+static constexpr int EMPTY_SIMPL_CMD_SIZE = UDP_DATA_SIZE - SIMPL_CMD_DATA_SIZE;
 
 static constexpr const char *MSG_HEADER_HELLO = "HELLO\0\0\0\0\0";
 static constexpr const char *MSG_HEADER_GOOD_DAY = "GOOD_DAY\0\0";
+static constexpr const char *MSG_HEADER_DEL = "DEL\0\0\0\0\0\0\0";
+static constexpr const char *MSG_HEADER_LIST = "LIST\0\0\0\0\0\0";
+static constexpr const char *MSG_HEADER_MY_LIST = "MY_LIST\0\0\0";
 
 struct SIMPL_CMD {
     char cmd[CMD_LEN];
@@ -44,11 +49,11 @@ static_assert(sizeof(SIMPL_CMD) == UDP_DATA_SIZE);
 static_assert(sizeof(CMPLX_CMD) == UDP_DATA_SIZE);
 static_assert(sizeof(BUF_CMD) == UDP_DATA_SIZE);
 
-bool cmd_send(int socket, void *ptr, struct sockaddr_in *address);
+bool cmd_send(int socket, void *cmd, size_t msg_len, struct sockaddr_in *address);
 
-bool cmd_recvfrom(int sock, void *buffer, struct sockaddr_in *from);
+ssize_t cmd_recvfrom(int sock, void *buffer, struct sockaddr_in *from);
 
-bool cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, struct timeval *timeout);
+ssize_t cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, struct timeval *timeout);
 
 void pckg_error(struct sockaddr_in *address);
 
