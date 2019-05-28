@@ -3,7 +3,8 @@
 
 #include <sstream>
 #include <unordered_map>
-#include <cstdlib> // rand()
+#include <cstdlib>
+#include <netdb.h>
 
 static constexpr int MULTICAST_UDP_TTL_VALUE = 4;
 
@@ -62,6 +63,8 @@ bool parse_command(struct command *c) {
 
     //todo whitespace as first argument...
 
+    //todo whitespacce in filename
+
     int args = 0;
     if (!linestream.eof()) {
         args++;
@@ -95,7 +98,34 @@ bool parse_command(struct command *c) {
     }
 }
 
-int create_socket() {
+int tcp_socket(std::string host, int port) {
+    struct addrinfo addr_hints;
+    struct addrinfo *addr_result;
+
+    memset(&addr_hints, 0, sizeof(struct addrinfo));
+    addr_hints.ai_family = AF_INET;
+    addr_hints.ai_socktype = SOCK_STREAM;
+    addr_hints.ai_protocol = IPPROTO_TCP;
+
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &addr_hints, &addr_result) != 0) {
+        return -1;
+    }
+
+    for (struct addrinfo *rp = addr_result; rp != NULL; rp = rp->ai_next) {
+        int sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sfd == -1) {
+            continue;
+        }
+        if (connect(sfd, rp->ai_addr, rp->ai_addrlen) == 0) {
+            freeaddrinfo(addr_result);
+            return sfd;
+        }
+        close(sfd);
+    }
+    return -1;
+}
+
+int udp_socket() {
     int sock;
 
     int broadcast_flag = 1;
@@ -141,13 +171,15 @@ void do_exit() {
     exit(0);
 }
 
-void do_discover(int socket) {
+void do_discover(int socket, std::vector<std::pair<std::string, uint64_t>> &servers_available) {
     uint64_t seq = (uint64_t) rand();
     struct SIMPL_CMD simple;
     struct CMPLX_CMD complex;
     struct sockaddr_in server_address;
     struct timeval timeout;
     ssize_t rcvd;
+
+    servers_available.clear();
 
     timeout.tv_sec = c_config.timeout;
     timeout.tv_usec = 0;
@@ -168,9 +200,11 @@ void do_discover(int socket) {
             pckg_error("wrong message metadata (discovering)", &server_address);
             continue;
         }
-        std::cout << "Found " << inet_ntoa(server_address.sin_addr) << "(" << c_config.server_address
-                  << ") with free space "
-                  << be64toh(complex.param) << std::endl;
+        std::string server_ip(inet_ntoa(server_address.sin_addr));
+        uint64_t server_space = be64toh(complex.param);
+        servers_available.push_back(std::pair<std::string, uint64_t>());
+        std::cout << "Found " << server_ip << "(" << c_config.server_address << ") with free space " << server_space
+                  << std::endl;
     }
     std::cout << "do_discover() returns\n";
 }
@@ -182,18 +216,21 @@ void do_remove(int socket, struct command *cmd) {
     simple.cmd_seq = htobe64((uint64_t) rand());
     snprintf(simple.data, SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
 
-    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE + cmd->arg.length() , &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE + cmd->arg.length(), &remote_multicast_address)) {
         perror("Couldn't send DEL message");
     }
 }
 
-void do_search(int socket, struct command *cmd) {
+void
+do_search(int socket, struct command *cmd, std::unordered_map<std::string, std::string> &files_available) {
     uint64_t seq = (uint64_t) rand();
     struct SIMPL_CMD simple;
     struct sockaddr_in server_address;
     struct timeval timeout;
     int msg_size = EMPTY_SIMPL_CMD_SIZE;
     ssize_t rcvd;
+
+    files_available.clear();
 
     timeout.tv_sec = c_config.timeout;
     timeout.tv_usec = 0;
@@ -221,37 +258,29 @@ void do_search(int socket, struct command *cmd) {
         }
 
         simple.data[rcvd - CMD_LEN - sizeof(simple.cmd_seq)] = '\0';
-        for (char * token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
-            std::cout << "{" << token << "}" << "{" << inet_ntoa(server_address.sin_addr) << "}\n";
+        for (char *token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
+            std::string filename(token);
+            std::string server_ip(inet_ntoa(server_address.sin_addr));
+
+            std::cout << "{" << filename << "}" << "{" << server_ip << "}\n";
+            files_available.insert({filename,server_ip});
         }
     }
     std::cout << "do_search() returns\n";
 }
 
-void execute_command(struct command *cmd, int socket) {
-    switch (cmd->type) {
-        case cmd_type::exit:
-            do_exit();
-            break;
-        case cmd_type::discover:
-            do_discover(socket);
-            break;
-        case cmd_type::remove:
-            do_remove(socket, cmd);
-            break;
-        case cmd_type::search_all:
-        case cmd_type::search_exp:
-            do_search(socket, cmd);
-            break;
-        default:
-            return;
-    }
-}
-
 int main(int argc, char *argv[]) {
     int sock;
     struct command cmd;
-    std::vector<std::string> filenames;
+
+    std::unordered_map<std::string, std::string> files_available;
+    std::vector<std::pair<std::string, uint64_t>> servers_available;
+
+    /*
+     *  std::sort(v.begin(), v.end(), [](auto &left, auto &right) {
+     *      return left.second < right.second;
+     *  });
+     */
 
     srand(time(NULL));
 
@@ -259,13 +288,33 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if ((sock = create_socket()) == -1) {
+    if ((sock = udp_socket()) == -1) {
         return 1;
     }
 
     for (;;) {
         if (parse_command(&cmd)) {
-            execute_command(&cmd, sock);
+            switch (cmd.type) {
+                case cmd_type::exit:
+                    do_exit();
+                    break;
+                case cmd_type::discover:
+                    do_discover(sock, servers_available);
+                    break;
+                case cmd_type::remove:
+                    do_remove(sock, &cmd);
+                    break;
+                case cmd_type::search_all:
+                case cmd_type::search_exp:
+                    do_search(sock, &cmd, files_available);
+                    break;
+                case cmd_type::fetch:
+                    break;
+                case cmd_type::upload:
+                    break;
+                default:
+                    break;
+            }
         }
     }
 }
