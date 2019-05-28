@@ -251,6 +251,8 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     worker_arg.file_size = std::filesystem::file_size(file_path, ec);
     worker_arg.fd = fd;
     worker_arg.sock = tcp_sock;
+    //todo move worker_arg to heap and add free() in worker
+    //!!!!
 
     op_success = op_success && pthread_create(&thread_work, &thread_attr, work_send, &worker_arg) == 0;
 

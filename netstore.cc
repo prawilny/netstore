@@ -82,6 +82,7 @@ ssize_t writen(int fd, const void *vptr, size_t n) {
     return n;
 }
 
+//todo edit return values so it can be used to copy files of previously unknown size.
 int fdncpy(int dest, int source, size_t len, char *buffer, size_t buffer_size) {
     for (size_t left = len; left != 0;) {
         ssize_t batch = readn(source, buffer, std::min(buffer_size, left));

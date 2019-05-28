@@ -34,10 +34,15 @@ struct command {
     std::string arg;
 };
 
+struct download_worker_arg{
+
+};
+
 // global variables:
 extern struct client_config c_config;
 struct sockaddr_in local_address;
 struct sockaddr_in remote_multicast_address;
+pthread_attr_t attr;
 
 bool parse_command(struct command *c) {
     std::string line, token;
@@ -69,6 +74,7 @@ bool parse_command(struct command *c) {
     if (!linestream.eof()) {
         args++;
         linestream >> c->arg;
+
         if (!linestream.eof()) {
             args++;
         }
@@ -216,7 +222,8 @@ void do_remove(int socket, struct command *cmd) {
     simple.cmd_seq = htobe64((uint64_t) rand());
     snprintf(simple.data, SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
 
-    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE + cmd->arg.length(), &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), SIMPL_CMD_DATA_SIZE),
+                  &remote_multicast_address)) {
         perror("Couldn't send DEL message");
     }
 }
@@ -259,21 +266,95 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, std::
 
         simple.data[rcvd - CMD_LEN - sizeof(simple.cmd_seq)] = '\0';
         for (char *token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
-            std::string filename(token);
-            std::string server_ip(inet_ntoa(server_address.sin_addr));
-
-            std::cout << "{" << filename << "}" << "{" << server_ip << "}\n";
-            files_available.insert({filename,server_ip});
+            std::cout << "{" << filename << "}" << "{" << inet_ntoa(server_address.sin_addr << "}\n";
+            files_available.insert({token, server_address});
         }
     }
     std::cout << "do_search() returns\n";
+}
+
+void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
+    struct SIMPL_CMD req;
+    struct CMPLX_CMD res;
+    struct timeval timeout;
+
+    uint64_t seq = (uint64_t) rand();
+    int fd;
+    int sfd;
+    std::error_code ec;
+    std::string filepath(c_config.download_folder + "/" + cmd->arg);
+    auto fileservers = files_available.find(cmd->arg);
+    struct sockaddr_in sockaddr;
+    std::string server_ip;
+    pthread_t pt;
+
+    if (fileservers == files_available.end()) {
+        std::cerr << "File not among last search results.\n";
+        return;
+    }
+    if (access(filepath.c_str(), F_OK) == 0) {
+        std::cerr << "File already exists.\n";
+        return;
+    }
+    if ((fd = open(filepath.c_str(), O_CREAT | O_WRONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
+        std::cerr << "Couldn't open file.\n";
+        return;
+    }
+    std::filesystem::path file_node(filepath);
+
+    memcpy(req.cmd, MSG_HEADER_GET, CMD_LEN);
+    req.cmd_seq = htobe64(seq);
+    snprintf("%s", SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
+
+    sockaddr = fileservers->second;
+
+    //for (auto it = fileservers; it != files_available.end(); it++)...
+    if (!cmd_send(socket, &req, std::min(cmd->arg.length(), SIMPL_CMD_DATA_SIZE), &sockaddr)) {
+        close(fd);
+        std::filesystem::remove(file_node, ec);
+        std::cerr << "Couldn't send request to server.\n";
+        return;
+    }
+
+    timeout.tv_sec = c_config.timeout;
+    timeout.tv_usec = 0;
+    rcvd = cmd_recvfrom_timed(socket, &res, &server_address, &timeout);
+    if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(res.cmd_seq) != seq
+        || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
+        || strncmp(cmd->arg.c_str(), res.data, SIMPL_CMD_DATA_SIZE) != 0) {
+        close(fd);
+        std::filesystem::remove(file_node, ec);
+        std::cerr << "Wrong format of server's reply.\n";
+        pckg_error("", &sockaddr);
+        return;
+    }
+
+    if ((sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(res.param))) == -1) {
+        close(fd);
+        std::filesystem::remove(file_node, ec);
+        std::cerr << "Couldn't connect TCP socket.\n";
+        return;
+    }
+
+
+
+    if (pthread_create(&pt, &thread_attr/* global SETDETACHEDSTATE */, work_send, &worker_arg) == 0) {
+        std::filesystem::remove(file_node, ec);
+        std::cerr << "Couldn't start worker.\n";
+    }
+
+    close(sfd);
+    close(fd);
+    //remove if something went wrong...
+
+    return;
 }
 
 int main(int argc, char *argv[]) {
     int sock;
     struct command cmd;
 
-    std::unordered_map<std::string, std::string> files_available;
+    std::unordered_map<std::string, struct sockaddr_in> files_available;
     std::vector<std::pair<std::string, uint64_t>> servers_available;
 
     /*
