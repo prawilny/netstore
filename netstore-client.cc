@@ -164,8 +164,8 @@ void do_discover(int socket) {
     std::cout << "HELLO sent\n";
 
     while ((rcvd = cmd_recvfrom_timed(socket, &complex, &server_address, &timeout)) != -1) {
-        if (be64toh(complex.cmd_seq) != seq || strncmp(MSG_HEADER_GOOD_DAY, complex.cmd, CMD_LEN) != 0) {
-            pckg_error(&server_address);
+        if (be64toh(complex.cmd_seq) != seq || memcmp(MSG_HEADER_GOOD_DAY, complex.cmd, CMD_LEN) != 0) {
+            pckg_error("wrong message metadata (discovering)", &server_address);
             continue;
         }
         std::cout << "Found " << inet_ntoa(server_address.sin_addr) << "(" << c_config.server_address
@@ -216,7 +216,7 @@ void do_search(int socket, struct command *cmd) {
 
     while ((rcvd = cmd_recvfrom_timed(socket, &simple, &server_address, &timeout)) != -1) {
         if (be64toh(simple.cmd_seq) != seq || strncmp(MSG_HEADER_MY_LIST, simple.cmd, CMD_LEN) != 0) {
-            pckg_error(&server_address);
+            pckg_error("wrong message metadata (searching)", &server_address);
             continue;
         }
 
