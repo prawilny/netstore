@@ -15,21 +15,12 @@ enum class req_type {
     invalid
 };
 
-struct worker_sender_data {
-    int sock;
-    int fd;
-    size_t file_size;
-};
-
 // global variables:
 extern struct server_config s_config;
 struct sockaddr_in local_address;
 struct sockaddr_in client_address;
-pthread_attr_t thread_attr;
-sigset_t blockSIGINT;
 
-void *work_send(void *ptr) {
-    struct worker_sender_data *data = (struct worker_sender_data *) ptr;
+void *work_send(int tcp_sock, int fd, size_t file_size) {
     char buffer[TCP_BUFFER_SIZE];
     struct timeval timeout;
     int sock_fd;
@@ -39,22 +30,20 @@ void *work_send(void *ptr) {
     timeout.tv_usec = 0;
     timeout.tv_sec = s_config.timeout;
 
-    error = error || pthread_sigmask(SIG_BLOCK, &blockSIGINT, NULL) == -1;
-
     //todo accept
     FD_ZERO(&rfds);
-    FD_SET(data->sock, &rfds);
+    FD_SET(tcp_sock, &rfds);
 
-    error = error || select(data->sock + 1, &rfds, NULL, NULL, &timeout) != 1;
+    error = error || select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1;
 
-    error = error || (sock_fd = accept(data->sock, NULL, NULL)) == -1;
+    error = error || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1;
 
     std::cout << (error ? "Worker failed before transmission" : "Started file transmission") << '\n';
-    error = error || fdncpy(sock_fd, data->fd, data->file_size, buffer, TCP_BUFFER_SIZE) != 0;
+    error = error || fdncpy(sock_fd, fd, file_size, buffer, TCP_BUFFER_SIZE) != 0;
     std::cout << "File transfer " << (error ? "failed" : "successful") << ".\n";
 
-    close(data->sock);
-    close(data->fd);
+    close(tcp_sock);
+    close(fd);
     close(sock_fd);
 
     return NULL;
@@ -206,9 +195,7 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     int tcp_sock;
     int tcp_port;
     struct sockaddr_in tcp_address;
-    pthread_t thread_work;
     char buffer[SIMPL_CMD_DATA_SIZE];
-    struct worker_sender_data worker_arg;
     socklen_t sockaddr_size;
 
     memcpy(buffer, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
@@ -246,19 +233,15 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     res.param = htobe64((uint64_t) tcp_port);
     memcpy(res.data, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
 
-    bool op_success = cmd_send(sock, &res, EMPTY_CMPLX_CMD_SIZE + (req_len - EMPTY_SIMPL_CMD_SIZE), &client_address);
+    bool msg_sent = cmd_send(sock, &res, EMPTY_CMPLX_CMD_SIZE + (req_len - EMPTY_SIMPL_CMD_SIZE), &client_address);
 
-    worker_arg.file_size = std::filesystem::file_size(file_path, ec);
-    worker_arg.fd = fd;
-    worker_arg.sock = tcp_sock;
-    //todo move worker_arg to heap and add free() in worker
-    //!!!!
-
-    op_success = op_success && pthread_create(&thread_work, &thread_attr, work_send, &worker_arg) == 0;
+    size_t file_size = std::filesystem::file_size(file_path, ec);
+    std::thread worker(work_send, tcp_sock, fd, file_size);
+    worker.detach();
 
     close(fd);
     close(tcp_port);
-    return op_success;
+    return msg_sent;
 }
 
 bool do_receive() {
@@ -296,13 +279,6 @@ int main(int argc, char *argv[]) {
     struct SIMPL_CMD *buffer_simpl = (struct SIMPL_CMD *) &buffer;
     struct CMPLX_CMD *buffer_cmplx = (struct CMPLX_CMD *) &buffer;
     ssize_t msg_len;
-
-    if (pthread_attr_init(&thread_attr) != 0
-        || pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED) != 0
-        || sigemptyset(&blockSIGINT) != 0
-        || sigaddset(&blockSIGINT, SIGINT) != 0) {
-        return 42;
-    }
 
     if (!parse_server_args(argc, argv)) {
         return 1;

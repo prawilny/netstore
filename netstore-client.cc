@@ -34,15 +34,10 @@ struct command {
     std::string arg;
 };
 
-struct download_worker_arg{
-
-};
-
 // global variables:
 extern struct client_config c_config;
 struct sockaddr_in local_address;
 struct sockaddr_in remote_multicast_address;
-pthread_attr_t attr;
 
 bool parse_command(struct command *c) {
     std::string line, token;
@@ -177,6 +172,38 @@ void do_exit() {
     exit(0);
 }
 
+void work_download(int sfd, int fd, std::filesystem::path file_node, struct sockaddr_in server_address) {
+    std::error_code ec;
+    std::string filename = file_node.filename();
+    std::string server_ip = inet_ntoa(server_address.sin_addr);
+    int server_port = server_address.sin_port;
+
+    char buffer[TCP_BUFFER_SIZE];
+    ssize_t rcvd;
+    while ((rcvd = readn(sfd, buffer, TCP_BUFFER_SIZE)) > 0) {
+        if (writen(fd, buffer, rcvd) != rcvd) {
+            std::cerr << "File {" << filename << "} downloading failed ({" << server_ip << "}:{" << server_port
+                      << "}) {" << "couldn't write to file.}";
+            std::filesystem::remove(file_node, ec);
+            close(fd);
+            close(sfd);
+            return;
+        }
+    }
+    close(fd);
+    close(sfd);
+
+    if (rcvd == -1) {
+        std::cerr << "File {" << filename << "} downloading failed ({" << server_ip << "}:{" << server_port
+                  << "}) {" << "couldn't read from socket.}";
+        std::filesystem::remove(file_node, ec);
+        return;
+    }
+
+    std::cout << "File {" << filename << "} downloaded ({" << server_ip << "}:{" << server_port << "})";
+    return;
+}
+
 void do_discover(int socket, std::vector<std::pair<std::string, uint64_t>> &servers_available) {
     uint64_t seq = (uint64_t) rand();
     struct SIMPL_CMD simple;
@@ -195,7 +222,7 @@ void do_discover(int socket, std::vector<std::pair<std::string, uint64_t>> &serv
     memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
 
     std::cout << "do_discover()\n";
-    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, (size_t) EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
         perror("Couldn't send HELLO message");
         return;
     }
@@ -222,14 +249,15 @@ void do_remove(int socket, struct command *cmd) {
     simple.cmd_seq = htobe64((uint64_t) rand());
     snprintf(simple.data, SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
 
-    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), SIMPL_CMD_DATA_SIZE),
+    if (!cmd_send(socket, &simple,
+                  (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
                   &remote_multicast_address)) {
         perror("Couldn't send DEL message");
     }
 }
 
 void
-do_search(int socket, struct command *cmd, std::unordered_map<std::string, std::string> &files_available) {
+do_search(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
     uint64_t seq = (uint64_t) rand();
     struct SIMPL_CMD simple;
     struct sockaddr_in server_address;
@@ -252,7 +280,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, std::
     }
 
     std::cout << "do_search()\n";
-    if (!cmd_send(socket, &simple, EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, (size_t)EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
         perror("Couldn't send LIST message");
         return;
     }
@@ -266,8 +294,8 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, std::
 
         simple.data[rcvd - CMD_LEN - sizeof(simple.cmd_seq)] = '\0';
         for (char *token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
-            std::cout << "{" << filename << "}" << "{" << inet_ntoa(server_address.sin_addr << "}\n";
-            files_available.insert({token, server_address});
+            std::cout << "{" << token << "}" << "{" << inet_ntoa(server_address.sin_addr) << "}\n";
+            files_available.insert(std::make_pair(token, server_address));
         }
     }
     std::cout << "do_search() returns\n";
@@ -286,7 +314,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     auto fileservers = files_available.find(cmd->arg);
     struct sockaddr_in sockaddr;
     std::string server_ip;
-    pthread_t pt;
+    ssize_t rcvd;
 
     if (fileservers == files_available.end()) {
         std::cerr << "File not among last search results.\n";
@@ -309,7 +337,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     sockaddr = fileservers->second;
 
     //for (auto it = fileservers; it != files_available.end(); it++)...
-    if (!cmd_send(socket, &req, std::min(cmd->arg.length(), SIMPL_CMD_DATA_SIZE), &sockaddr)) {
+    if (!cmd_send(socket, &req, std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE), &sockaddr)) {
         close(fd);
         std::filesystem::remove(file_node, ec);
         std::cerr << "Couldn't send request to server.\n";
@@ -318,7 +346,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
 
     timeout.tv_sec = c_config.timeout;
     timeout.tv_usec = 0;
-    rcvd = cmd_recvfrom_timed(socket, &res, &server_address, &timeout);
+    rcvd = cmd_recvfrom_timed(socket, &res, &sockaddr, &timeout);
     if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(res.cmd_seq) != seq
         || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
         || strncmp(cmd->arg.c_str(), res.data, SIMPL_CMD_DATA_SIZE) != 0) {
@@ -335,13 +363,10 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
         std::cerr << "Couldn't connect TCP socket.\n";
         return;
     }
+    //}; todo: add loops breaks
 
-
-
-    if (pthread_create(&pt, &thread_attr/* global SETDETACHEDSTATE */, work_send, &worker_arg) == 0) {
-        std::filesystem::remove(file_node, ec);
-        std::cerr << "Couldn't start worker.\n";
-    }
+    std::thread worker(work_download, sfd, fd, file_node, sockaddr);
+    worker.detach();
 
     close(sfd);
     close(fd);
