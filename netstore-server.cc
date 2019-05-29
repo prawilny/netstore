@@ -20,12 +20,11 @@ extern struct server_config s_config;
 struct sockaddr_in local_address;
 struct sockaddr_in client_address;
 
-void *work_send(int tcp_sock, int fd, size_t file_size) {
+void work_send(int tcp_sock, int fd, size_t file_size) {
     char buffer[TCP_BUFFER_SIZE];
     struct timeval timeout;
     int sock_fd;
     fd_set rfds;
-    bool error = false;
 
     timeout.tv_usec = 0;
     timeout.tv_sec = s_config.timeout;
@@ -34,19 +33,41 @@ void *work_send(int tcp_sock, int fd, size_t file_size) {
     FD_ZERO(&rfds);
     FD_SET(tcp_sock, &rfds);
 
-    error = error || select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1;
-
-    error = error || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1;
-
-    std::cout << (error ? "Worker failed before transmission" : "Started file transmission") << '\n';
-    error = error || fdncpy(sock_fd, fd, file_size, buffer, TCP_BUFFER_SIZE) != 0;
-    std::cout << "File transfer " << (error ? "failed" : "successful") << ".\n";
+    if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1
+        || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1
+        || fdncpy(sock_fd, fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
+        std::cerr << "Something went wrong receiving\n";
+    }
 
     close(tcp_sock);
     close(fd);
     close(sock_fd);
+    return;
+}
 
-    return NULL;
+void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) {
+    char buffer[TCP_BUFFER_SIZE];
+    struct timeval timeout;
+    int sock_fd;
+    fd_set rfds;
+
+    timeout.tv_usec = 0;
+    timeout.tv_sec = s_config.timeout;
+
+    FD_ZERO(&rfds);
+    FD_SET(tcp_sock, &rfds);
+
+    if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1
+        || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1
+        || fdncpy(fd, sfd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
+        std::cerr << "Something went wrong receiving\n";
+    }
+
+    close(sock_fd);
+    close(fd);
+    close(tcp_sock);
+    remove(filename);
+    return;
 }
 
 bool index_files(std::vector<std::string> &names) {
@@ -78,7 +99,7 @@ bool index_files(std::vector<std::string> &names) {
     return true;
 }
 
-int create_socket() {
+int udp_multicast_socket() {
     int sock;
     struct ip_mreq ip_mreq;
 
@@ -114,6 +135,24 @@ int create_socket() {
     }
 
     return sock;
+}
+
+int tcp_socket(struct sockaddr_in *tcp_address) {
+    int tcp_sock;
+
+    tcp_address.sin_addr.s_addr = INADDR_ANY;
+    tcp_address.sin_family = AF_INET;
+    sockaddr_size = sizeof(tcp_address);
+
+    if ((tcp_sock = socket(PF_INET, SOCK_STREAM, 0)) == -1
+        || bind(tcp_sock, (sockaddr *) &tcp_address, sizeof(tcp_address)) == -1
+        || listen(tcp_sock, 1)
+        || getsockname(tcp_sock, (sockaddr *) &tcp_address, &sockaddr_size) == -1) {
+        return -1;
+    }
+    tcp_port = tcp_address.sin_port;
+
+    return tcp_sock;
 }
 
 bool do_hello(int sock, struct SIMPL_CMD *request) {
@@ -166,6 +205,7 @@ bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
 
     std::sort(filenames.begin(), filenames.end());
 
+    //todo DAFUQ?
     for (auto it = filenames.begin(); it != filenames.end();) {
         memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
         int left_space = SIMPL_CMD_DATA_SIZE;
@@ -212,18 +252,9 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
         return false;
     }
 
-    //socket
-    tcp_address.sin_addr.s_addr = INADDR_ANY;
-    tcp_address.sin_family = AF_INET;
-    sockaddr_size = sizeof(tcp_address);
-
-    if ((tcp_sock = socket(PF_INET, SOCK_STREAM, 0)) == -1
-        || bind(tcp_sock, (sockaddr *) &tcp_address, sizeof(tcp_address)) == -1
-        || listen(tcp_sock, 1)
-        || getsockname(tcp_sock, (sockaddr *) &tcp_address, &sockaddr_size) == -1) {
+    if ((tcp_sock = tcp_socket(&tcp_address)) == -1) {
         std::cerr << "Couldn't create socket\n";
         close(fd);
-        close(tcp_sock);
         return false;
     }
     tcp_port = tcp_address.sin_port;
@@ -244,8 +275,51 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     return msg_sent;
 }
 
-bool do_receive() {
-    return false;
+bool do_receive(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
+    struct CMPLX_CMD msg;
+    int fd;
+    int tcp_sock;
+    int tcp_port;
+    size_t file_size;
+    struct sockaddr_in tcp_address;
+    char buffer[SIMPL_CMD_DATA_SIZE];
+    socklen_t sockaddr_size;
+
+    memcpy(buffer, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
+    std::string filename(buffer);
+    std::string filepath(s_config.shared_folder + '/' + filename);
+    file_size = be64toh(msg.param);
+
+    if (file_size > s_config.free_space || filename.find('/') != std::string::npos
+        || filename.length() == 0) {
+        memcpy(msg.cmd, MSG_HEADER_NO_WAY, CMD_LEN);
+        return cmd_send(sock, &msg, EMPTY_SIMPL_CMD_SIZE, &client_address);
+    }
+
+    if (std::find(filenames.begin(), filenames.end(), filename) != filenames.end()
+        || (fd = open(filepath.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG | S_IRWXO) == -1)) {
+        std::cerr << "File already present\n";
+        return false;
+    }
+
+    if ((tcp_sock = tcp_socket(&tcp_address)) == -1) {
+        std::cerr << "Couldn't create socket\n";
+        close(fd);
+        return false;
+    }
+    tcp_port = tcp_address.sin_port;
+
+    memcpy(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN);
+    msg.param = htobe64((uint64_t) tcp_port);
+
+    bool msg_sent = cmd_send(sock, &msg, req_len, &client_address);
+
+    std::thread worker(work_receive, tcp_sock, fd, file_size, filename.c_str());
+    worker.detach();
+
+    close(fd);
+    close(tcp_port);
+    return msg_sent;
 }
 
 req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
@@ -276,8 +350,6 @@ int main(int argc, char *argv[]) {
     int sock;
     std::vector<std::string> filenames;
     struct BUF_CMD buffer;
-    struct SIMPL_CMD *buffer_simpl = (struct SIMPL_CMD *) &buffer;
-    struct CMPLX_CMD *buffer_cmplx = (struct CMPLX_CMD *) &buffer;
     ssize_t msg_len;
 
     if (!parse_server_args(argc, argv)) {
@@ -288,7 +360,7 @@ int main(int argc, char *argv[]) {
         return 2;
     }
 
-    if ((sock = create_socket()) == -1) {
+    if ((sock = udp_multicast_socket()) == -1) {
         return 3;
     }
 
@@ -301,37 +373,37 @@ int main(int argc, char *argv[]) {
         std::cout << "msg received\n";
         switch (parse_req_type(&buffer, msg_len)) {
             case req_type::hello:
-                if (!do_hello(sock, buffer_simpl)) {
+                if (!do_hello(sock, (struct SIMPL_CMD *) &buffer) {
                     std::cerr << "Error replying to hello\n";
                 }
                 break;
             case req_type::remove:
-                if (!do_remove(buffer_simpl, msg_len, filenames)) {
+                if (!do_remove((struct SIMPL_CMD *) &buffer, msg_len, filenames)) {
                     std::cerr << "Error removing file\n";
                 }
                 break;
             case req_type::list_all:
-                if (!do_list(sock, buffer_simpl, msg_len, filenames, false)) {
+                if (!do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, filenames, false)) {
                     std::cerr << "Error sending list\n";
                 }
                 break;
             case req_type::list_exp:
-                if (!do_list(sock, buffer_simpl, msg_len, filenames, true)) {
+                if (!do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, filenames, true)) {
                     std::cerr << "Error sending list\n";
                 }
                 break;
             case req_type::download:
-                if (!do_send(sock, buffer_simpl, msg_len, filenames)) {
+                if (!do_send(sock, (struct SIMPL_CMD *) &buffer, msg_len, filenames)) {
                     std::cerr << "Error starting file transmission to client\n";
                 }
                 break;
             case req_type::upload:
-                if (!do_receive()) {
+                if (!do_receive(sock, (struct CMPLX_CMD *) &buffer, msg_len, filenames)) {
                     std::cerr << "Error starting file transmission from client\n";
                 }
                 break;
             case req_type::invalid:
-                pckg_error("", &client_address);
+                pckg_error("Invalid message metadata", &client_address);
                 break;
         }
     }
