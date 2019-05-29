@@ -36,6 +36,8 @@ static constexpr const char *MSG_HEADER_MY_LIST = "MY_LIST\0\0\0";
 static constexpr const char *MSG_HEADER_GET = "GET\0\0\0\0\0\0\0";
 static constexpr const char *MSG_HEADER_ADD = "ADD\0\0\0\0\0\0\0";
 static constexpr const char *MSG_HEADER_CONNECT_ME = "CONNECT_ME";
+static constexpr const char *MSG_HEADER_CAN_ADD = "CAN_ADD\0\0\0";
+static constexpr const char *MSG_HEADER_NO_WAY = "NO_WAY\0\0\0\0";
 
 struct SIMPL_CMD {
     char cmd[CMD_LEN];

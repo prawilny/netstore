@@ -203,7 +203,25 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
     return;
 }
 
-void do_discover(int socket, std::vector<std::pair<std::string, uint64_t>> &servers_available) {
+void work_upload(int sfd, int fd, size_t filesize, std::string fname, std::string server_ip, int server_port) {
+    std::error_code ec;
+    char buffer[TCP_BUFFER_SIZE];
+
+    int result = fdncpy(sfd, fd, filesize, buffer, TCP_BUFFER_SIZE);
+
+    close(sfd);
+    close(fd);
+
+    if (result == -1) {
+        std::cout << "File {" << fname << "} uploading failed ({" << server_ip << "}:{" << server_port << "})"
+                  << "Couldn't write  to socket.";
+    } else {
+        std::cout << "File {" << fname << "} uploaded ({" << server_ip << "}:{" << server_port << "})";
+    }
+}
+
+
+void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>> &servers_available) {
     uint64_t seq = (uint64_t) rand();
     struct SIMPL_CMD simple;
     struct CMPLX_CMD complex;
@@ -218,7 +236,6 @@ void do_discover(int socket, std::vector<std::pair<std::string, uint64_t>> &serv
 
     memcpy(simple.cmd, MSG_HEADER_HELLO, CMD_LEN);
     simple.cmd_seq = htobe64(seq);
-    memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
 
     std::cout << "do_discover()\n";
     if (!cmd_send(socket, &simple, (size_t) EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
@@ -234,7 +251,7 @@ void do_discover(int socket, std::vector<std::pair<std::string, uint64_t>> &serv
         }
         std::string server_ip(inet_ntoa(server_address.sin_addr));
         uint64_t server_space = be64toh(complex.param);
-        servers_available.push_back(std::pair<std::string, uint64_t>());
+        servers_available.push_back(std::make_pair(server_address, server_space));
         std::cout << "Found " << server_ip << "(" << c_config.server_address << ") with free space " << server_space
                   << std::endl;
     }
@@ -271,7 +288,6 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
 
     memcpy(simple.cmd, MSG_HEADER_LIST, CMD_LEN);
     simple.cmd_seq = htobe64(seq);
-    memset(simple.data, '\0', SIMPL_CMD_DATA_SIZE);
 
     if (cmd->type == cmd_type::search_exp) {
         snprintf(simple.data, SIMPL_CMD_DATA_SIZE, "%s", cmd->arg.c_str());
@@ -335,9 +351,11 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
 
         memcpy(req.cmd, MSG_HEADER_GET, CMD_LEN);
         req.cmd_seq = htobe64(seq);
-        snprintf("%s", SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
+        snprintf(req.data, CMPLX_CMD_DATA_SIZE, "%s", cmd->arg.c_str());
 
-        if (!cmd_send(socket, &req, std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE), &sockaddr)) {
+        if (!cmd_send(socket, &req,
+                      (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
+                      &sockaddr)) {
             continue;
         }
 
@@ -370,7 +388,79 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
 
     close(sfd);
     close(fd);
-    //remove if something went wrong...
+
+    return;
+}
+
+void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in, uint64_t>> &servers_available) {
+    std::sort(servers_available.begin(), servers_available.end(), [](auto &left, auto &right) {
+        return left.second < right.second;
+    });
+
+    uint64_t seq;
+    int fd;
+    int sfd;
+    ssize_t rcvd;
+
+    if ((fd = open(cmd->arg.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
+        std::cerr << "Couldn't open file.\n";
+        return;
+    }
+
+    std::error_code ec;
+    std::filesystem::path file_node(cmd->arg);
+    uint64_t filesize = std::filesystem::file_size(file_node, ec);
+    std::string filename = file_node.filename();
+
+    bool connected = false;
+    struct sockaddr_in sockaddr;
+    for (auto it = servers_available.begin(); !connected && it != servers_available.end(); it++) {
+        struct CMPLX_CMD msg;
+        struct timeval timeout;
+
+        seq = (uint64_t) rand();
+        struct sockaddr_in sockaddr = it->first;
+
+        memcpy(msg.cmd, MSG_HEADER_ADD, CMD_LEN);
+        msg.cmd_seq = htobe64(seq);
+        snprintf(msg.data, CMPLX_CMD_DATA_SIZE, "%s", cmd->arg.c_str());
+
+        if (!cmd_send(sock, &msg,
+                      (size_t) EMPTY_CMPLX_CMD_SIZE + std::min(cmd->arg.length(), (size_t) CMPLX_CMD_DATA_SIZE),
+                      &sockaddr)) {
+            continue;
+        }
+
+        timeout.tv_usec = 0;
+        timeout.tv_sec = c_config.timeout;
+        rcvd = cmd_recvfrom_timed(sock, &msg, &sockaddr, &timeout);
+
+        if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(msg.cmd_seq) != seq
+            || memcmp(msg.cmd, MSG_HEADER_CAN_ADD, CMD_LEN) != 0
+            || strncmp(cmd->arg.c_str(), msg.data, SIMPL_CMD_DATA_SIZE) != 0) {
+            if (rcvd != -1) {
+                pckg_error("Wrong message format", &sockaddr);
+            }
+            //"NO_WAY" message ends up here
+            continue;
+        }
+
+        if ((sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(msg.param))) == -1) {
+            continue;
+        }
+        connected = true;
+    }
+
+    if (connected) {
+        std::thread worker(work_upload, sfd, fd, filesize, filename, std::string(inet_ntoa(sockaddr.sin_addr)),
+                           sockaddr.sin_port);
+        worker.detach();
+    } else {
+        std::cerr << "No server could accept file " << cmd->arg << ".\n";
+    }
+
+    close(sfd);
+    close(fd);
 
     return;
 }
@@ -380,7 +470,7 @@ int main(int argc, char *argv[]) {
     struct command cmd;
 
     std::unordered_map<std::string, struct sockaddr_in> files_available;
-    std::vector<std::pair<std::string, uint64_t>> servers_available;
+    std::vector<std::pair<struct sockaddr_in, uint64_t>> servers_available;
 
     srand(time(NULL));
 
@@ -409,8 +499,10 @@ int main(int argc, char *argv[]) {
                     do_search(sock, &cmd, files_available);
                     break;
                 case cmd_type::fetch:
+                    do_fetch(sock, &cmd, files_available);
                     break;
                 case cmd_type::upload:
+                    do_upload(sock, &cmd, servers_available);
                     break;
                 default:
                     break;
