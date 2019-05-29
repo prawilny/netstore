@@ -123,6 +123,7 @@ int tcp_socket(std::string host, int port) {
         }
         close(sfd);
     }
+    freeaddrinfo(addr_result);
     return -1;
 }
 
@@ -172,11 +173,9 @@ void do_exit() {
     exit(0);
 }
 
-void work_download(int sfd, int fd, std::filesystem::path file_node, struct sockaddr_in server_address) {
+void work_download(int sfd, int fd, std::filesystem::path file_node, std::string server_ip, int server_port) {
     std::error_code ec;
     std::string filename = file_node.filename();
-    std::string server_ip = inet_ntoa(server_address.sin_addr);
-    int server_port = server_address.sin_port;
 
     char buffer[TCP_BUFFER_SIZE];
     ssize_t rcvd;
@@ -280,7 +279,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
     }
 
     std::cout << "do_search()\n";
-    if (!cmd_send(socket, &simple, (size_t)EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, (size_t) EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
         perror("Couldn't send LIST message");
         return;
     }
@@ -306,14 +305,12 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     struct CMPLX_CMD res;
     struct timeval timeout;
 
-    uint64_t seq = (uint64_t) rand();
+    uint64_t seq;
     int fd;
     int sfd;
     std::error_code ec;
     std::string filepath(c_config.download_folder + "/" + cmd->arg);
     auto fileservers = files_available.find(cmd->arg);
-    struct sockaddr_in sockaddr;
-    std::string server_ip;
     ssize_t rcvd;
 
     if (fileservers == files_available.end()) {
@@ -330,43 +327,46 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     }
     std::filesystem::path file_node(filepath);
 
-    memcpy(req.cmd, MSG_HEADER_GET, CMD_LEN);
-    req.cmd_seq = htobe64(seq);
-    snprintf("%s", SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
+    bool connected = false;
+    struct sockaddr_in sockaddr;
+    for (auto it = fileservers; !connected && it != files_available.end(); it++) {
+        seq = (uint64_t) rand();
+        sockaddr = it->second;
 
-    sockaddr = fileservers->second;
+        memcpy(req.cmd, MSG_HEADER_GET, CMD_LEN);
+        req.cmd_seq = htobe64(seq);
+        snprintf("%s", SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
 
-    //for (auto it = fileservers; it != files_available.end(); it++)...
-    if (!cmd_send(socket, &req, std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE), &sockaddr)) {
-        close(fd);
-        std::filesystem::remove(file_node, ec);
-        std::cerr << "Couldn't send request to server.\n";
-        return;
+        if (!cmd_send(socket, &req, std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE), &sockaddr)) {
+            continue;
+        }
+
+        timeout.tv_sec = c_config.timeout;
+        timeout.tv_usec = 0;
+        rcvd = cmd_recvfrom_timed(socket, &res, &sockaddr, &timeout);
+        if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(res.cmd_seq) != seq
+            || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
+            || strncmp(cmd->arg.c_str(), res.data, SIMPL_CMD_DATA_SIZE) != 0) {
+            if (rcvd != -1) {
+                pckg_error("Wrong message format", &sockaddr);
+            }
+            continue;
+        }
+
+        if ((sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(res.param))) == -1) {
+            continue;
+        }
+        connected = true;
     }
 
-    timeout.tv_sec = c_config.timeout;
-    timeout.tv_usec = 0;
-    rcvd = cmd_recvfrom_timed(socket, &res, &sockaddr, &timeout);
-    if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(res.cmd_seq) != seq
-        || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
-        || strncmp(cmd->arg.c_str(), res.data, SIMPL_CMD_DATA_SIZE) != 0) {
-        close(fd);
+    if (connected) {
+        std::thread worker(work_download, sfd, fd, file_node, std::string(inet_ntoa(sockaddr.sin_addr)),
+                           sockaddr.sin_port);
+        worker.detach();
+    } else {
+        std::cerr << "Couldn't reach any server hosting file " << cmd->arg << ".\n";
         std::filesystem::remove(file_node, ec);
-        std::cerr << "Wrong format of server's reply.\n";
-        pckg_error("", &sockaddr);
-        return;
     }
-
-    if ((sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(res.param))) == -1) {
-        close(fd);
-        std::filesystem::remove(file_node, ec);
-        std::cerr << "Couldn't connect TCP socket.\n";
-        return;
-    }
-    //}; todo: add loops breaks
-
-    std::thread worker(work_download, sfd, fd, file_node, sockaddr);
-    worker.detach();
 
     close(sfd);
     close(fd);
@@ -381,12 +381,6 @@ int main(int argc, char *argv[]) {
 
     std::unordered_map<std::string, struct sockaddr_in> files_available;
     std::vector<std::pair<std::string, uint64_t>> servers_available;
-
-    /*
-     *  std::sort(v.begin(), v.end(), [](auto &left, auto &right) {
-     *      return left.second < right.second;
-     *  });
-     */
 
     srand(time(NULL));
 
