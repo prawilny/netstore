@@ -30,6 +30,8 @@ ssize_t cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, str
     timersub(timeout, &diff, &left);
     *timeout = left;
 
+    printf("%ld %ld, %ld %ld\n", start.tv_sec, start.tv_usec, end.tv_sec, end.tv_usec);
+
     return result;
 }
 

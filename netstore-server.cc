@@ -1,9 +1,6 @@
 #include "netstore.h"
 #include "netstore-boost.h"
-#include <regex>
 #include <csignal>
-
-static std::string ANYTHING_REGEXP = ".*";
 
 enum class req_type {
     hello,
@@ -20,6 +17,7 @@ extern struct server_config s_config;
 struct sockaddr_in local_address;
 struct sockaddr_in client_address;
 
+//checked
 void work_send(int tcp_sock, int fd, size_t file_size) {
     char buffer[TCP_BUFFER_SIZE];
     struct timeval timeout;
@@ -29,7 +27,6 @@ void work_send(int tcp_sock, int fd, size_t file_size) {
     timeout.tv_usec = 0;
     timeout.tv_sec = s_config.timeout;
 
-    //todo accept
     FD_ZERO(&rfds);
     FD_SET(tcp_sock, &rfds);
 
@@ -39,12 +36,15 @@ void work_send(int tcp_sock, int fd, size_t file_size) {
         std::cerr << "Something went wrong receiving\n";
     }
 
+    //todo edit filelist
+
     close(tcp_sock);
     close(fd);
     close(sock_fd);
     return;
 }
 
+//checked
 void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) {
     char buffer[TCP_BUFFER_SIZE];
     struct timeval timeout;
@@ -59,17 +59,20 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
 
     if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1
         || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1
-        || fdncpy(fd, sfd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
+        || fdncpy(fd, sock_fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
         std::cerr << "Something went wrong receiving\n";
+        remove(filename);
+    } else{
+        std::cout << "Upload succesful.\n";
     }
 
     close(sock_fd);
     close(fd);
     close(tcp_sock);
-    remove(filename);
     return;
 }
 
+//checked
 bool index_files(std::vector<std::string> &names) {
     std::filesystem::path dir(s_config.shared_folder);
 
@@ -83,12 +86,12 @@ bool index_files(std::vector<std::string> &names) {
             if (std::filesystem::is_regular_file(*iter)
                 && iter->path().filename().string().length() < CMPLX_CMD_DATA_SIZE) {
                 names.push_back(iter->path().filename());
-                uint64_t fSize = iter->file_size();
-                if (fSize > s_config.free_space) {
+                uint64_t f_size = iter->file_size();
+                if (f_size > s_config.free_space) {
                     std::cerr << "Shared folder's size exceeds limit\n";
                     return false;
                 }
-                s_config.free_space -= fSize;
+                s_config.free_space -= f_size;
             }
         }
     }
@@ -99,27 +102,25 @@ bool index_files(std::vector<std::string> &names) {
     return true;
 }
 
+//checked
 int udp_multicast_socket() {
     int sock;
     struct ip_mreq ip_mreq;
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        std::cerr << "socket\n";
-        perror(NULL);
+        perror("socket");
         return -1;
     }
 
     ip_mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     if (inet_aton(s_config.server_address.c_str(), &ip_mreq.imr_multiaddr) == 0) {
-        std::cerr << "inet_aton\n";
-        perror(NULL);
+        perror("inet_aton");
         close(sock);
         return -1;
     }
 
     if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &ip_mreq, sizeof(ip_mreq)) == -1) {
-        std::cerr << "setsockopt\n";
-        perror(NULL);
+        perror("setsockopt");
         close(sock);
         return -1;
     }
@@ -128,8 +129,7 @@ int udp_multicast_socket() {
     local_address.sin_addr.s_addr = htonl(INADDR_ANY);
     local_address.sin_port = htons((uint16_t) s_config.server_port);
     if (bind(sock, (struct sockaddr *) &local_address, sizeof(local_address)) < 0) {
-        std::cerr << "bind\n";
-        perror(NULL);
+        perror("bind");
         close(sock);
         return -1;
     }
@@ -137,24 +137,25 @@ int udp_multicast_socket() {
     return sock;
 }
 
+//checked
 int tcp_socket(struct sockaddr_in *tcp_address) {
     int tcp_sock;
 
-    tcp_address.sin_addr.s_addr = INADDR_ANY;
-    tcp_address.sin_family = AF_INET;
-    sockaddr_size = sizeof(tcp_address);
+    tcp_address->sin_addr.s_addr = INADDR_ANY;
+    tcp_address->sin_family = AF_INET;
+    socklen_t sockaddr_size = sizeof(tcp_address);
 
     if ((tcp_sock = socket(PF_INET, SOCK_STREAM, 0)) == -1
-        || bind(tcp_sock, (sockaddr *) &tcp_address, sizeof(tcp_address)) == -1
+        || bind(tcp_sock, (sockaddr *) tcp_address, sizeof(tcp_address)) == -1
         || listen(tcp_sock, 1)
-        || getsockname(tcp_sock, (sockaddr *) &tcp_address, &sockaddr_size) == -1) {
+        || getsockname(tcp_sock, (sockaddr *) tcp_address, &sockaddr_size) == -1) {
         return -1;
     }
-    tcp_port = tcp_address.sin_port;
 
     return tcp_sock;
 }
 
+//checked
 bool do_hello(int sock, struct SIMPL_CMD *request) {
     struct CMPLX_CMD reply;
 
@@ -162,15 +163,20 @@ bool do_hello(int sock, struct SIMPL_CMD *request) {
     reply.cmd_seq = request->cmd_seq;
     reply.param = htobe64(s_config.free_space);
 
-    return cmd_send(sock, &reply, EMPTY_SIMPL_CMD_SIZE, &client_address);
+    return cmd_send(sock, &reply, EMPTY_CMPLX_CMD_SIZE, &client_address);
 }
 
+//checked
 bool do_remove(struct SIMPL_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
     std::error_code ec;
+    int data_len = req_len = EMPTY_SIMPL_CMD_SIZE;
+    size_t f_size;
 
-    char buffer[SIMPL_CMD_DATA_SIZE];
-    memcpy(buffer, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
-    std::string filename(buffer);
+    char buffer[SIMPL_CMD_DATA_SIZE + 1];
+    memcpy(buffer, request->data, data_len);
+    buffer[data_len] = '\0';
+
+    std::string filename = std::string(buffer);
     std::filesystem::path file(s_config.shared_folder + '/' + filename);
     auto file_pos = std::find(filenames.begin(), filenames.end(), filename);
 
@@ -178,57 +184,67 @@ bool do_remove(struct SIMPL_CMD *request, size_t req_len, std::vector<std::strin
         || !std::filesystem::is_regular_file(file)) {
         return false;
     }
-
     filenames.erase(file_pos);
-    //todo check error_code...
-    s_config.free_space += std::filesystem::file_size(file, ec);
+
+    f_size = std::filesystem::file_size(file, ec);
+    if (ec) {
+        s_config.free_space += f_size;
+    }
     std::filesystem::remove(file, ec);
     return true;
 }
 
+//checked
 bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<std::string> filenames, bool filtered) {
     struct SIMPL_CMD reply;
+    int data_len = req_len - EMPTY_SIMPL_CMD_SIZE;
+
     memcpy(reply.cmd, MSG_HEADER_MY_LIST, CMD_LEN);
     reply.cmd_seq = request->cmd_seq;
 
     if (filtered) {
-        char buffer[SIMPL_CMD_DATA_SIZE];
-        memcpy(buffer, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
+        char buffer[SIMPL_CMD_DATA_SIZE + 1];
+        memcpy(buffer, request->data, data_len);
+        buffer[data_len] = '\0';
 
-        std::regex pattern(ANYTHING_REGEXP + std::string(buffer) + ANYTHING_REGEXP);
-        for (auto it = filenames.begin(); it != filenames.end(); it++) {
-            if (!std::regex_match(*it, pattern)) {
-                filenames.erase(it);
+        for (auto it = filenames.begin(); it != filenames.end();) {
+            if (strstr((*it).c_str(), buffer) == NULL) {
+                it = filenames.erase(it);
+            } else {
+                it++;
             }
         }
     }
 
-    std::sort(filenames.begin(), filenames.end());
+    if (!filenames.empty()) {
+        std::sort(filenames.begin(), filenames.end());
 
-    //todo DAFUQ?
-    for (auto it = filenames.begin(); it != filenames.end();) {
-        memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
-        int left_space = SIMPL_CMD_DATA_SIZE;
+        int left_space;
+        for (auto it = filenames.begin(); it != filenames.end();) {
+            memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
+            left_space = SIMPL_CMD_DATA_SIZE;
 
-        for (; it != filenames.end(); it++) {
-            int filename_len = it->length() + 1;
-            if (left_space < filename_len) {
-                if (!cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address)) {
-                    return false;
+            for (; it != filenames.end(); it++) {
+                int filename_len = it->length() + 1;
+                if (left_space < filename_len) {
+                    if (!cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address)) {
+                        return false;
+                    }
+                    break;
                 }
-                break;
-            }
 
-            snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len, "%s", it->c_str());
-            left_space -= filename_len;
-            reply.data[SIMPL_CMD_DATA_SIZE - left_space - 1] = '\n';
+                snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len, "%s", it->c_str());
+                reply.data[SIMPL_CMD_DATA_SIZE - left_space + filename_len - 1] = '\n';
+                left_space -= filename_len;
+            }
         }
         return cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address); //added last filename to reply
     }
 
-    return true; //filenames.size() == 0
+    return true;
 }
 
+//checked
 bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
     struct CMPLX_CMD res;
     int fd;
@@ -236,9 +252,10 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     int tcp_port;
     struct sockaddr_in tcp_address;
     char buffer[SIMPL_CMD_DATA_SIZE];
-    socklen_t sockaddr_size;
+    int data_len = req_len - EMPTY_SIMPL_CMD_SIZE;
 
-    memcpy(buffer, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
+    memcpy(buffer, request->data, data_len);
+    buffer[data_len] = '\0';
     std::string filename(buffer);
     std::string filepath(s_config.shared_folder + '/' + filename);
 
@@ -262,9 +279,9 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     memcpy(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN);
     res.cmd_seq = request->cmd_seq;
     res.param = htobe64((uint64_t) tcp_port);
-    memcpy(res.data, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
+    memcpy(res.data, request->data, data_len);
 
-    bool msg_sent = cmd_send(sock, &res, EMPTY_CMPLX_CMD_SIZE + (req_len - EMPTY_SIMPL_CMD_SIZE), &client_address);
+    bool msg_sent = cmd_send(sock, &res, EMPTY_CMPLX_CMD_SIZE + data_len, &client_address);
 
     size_t file_size = std::filesystem::file_size(file_path, ec);
     std::thread worker(work_send, tcp_sock, fd, file_size);
@@ -275,7 +292,8 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     return msg_sent;
 }
 
-bool do_receive(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
+//checked
+bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
     struct CMPLX_CMD msg;
     int fd;
     int tcp_sock;
@@ -283,15 +301,15 @@ bool do_receive(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector
     size_t file_size;
     struct sockaddr_in tcp_address;
     char buffer[SIMPL_CMD_DATA_SIZE];
-    socklen_t sockaddr_size;
+    int data_len = req_len - EMPTY_SIMPL_CMD_SIZE
 
-    memcpy(buffer, request->data, req_len - EMPTY_SIMPL_CMD_SIZE);
+    memcpy(buffer, request->data, data_len);
+    buffer[data_len] = '\0';
     std::string filename(buffer);
     std::string filepath(s_config.shared_folder + '/' + filename);
     file_size = be64toh(msg.param);
 
-    if (file_size > s_config.free_space || filename.find('/') != std::string::npos
-        || filename.length() == 0) {
+    if (file_size > s_config.free_space || filename.find('/') != std::string::npos || filename.length() == 0) {
         memcpy(msg.cmd, MSG_HEADER_NO_WAY, CMD_LEN);
         return cmd_send(sock, &msg, EMPTY_SIMPL_CMD_SIZE, &client_address);
     }
@@ -309,7 +327,7 @@ bool do_receive(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector
     }
     tcp_port = tcp_address.sin_port;
 
-    memcpy(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN);
+    memcpy(msg.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN);
     msg.param = htobe64((uint64_t) tcp_port);
 
     bool msg_sent = cmd_send(sock, &msg, req_len, &client_address);
@@ -322,30 +340,32 @@ bool do_receive(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector
     return msg_sent;
 }
 
+//checked
 req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
-    if (memcmp(buf->cmd, MSG_HEADER_HELLO, CMD_LEN) == 0
-        && msg_len == EMPTY_SIMPL_CMD_SIZE) {
+    if (msg_len == EMPTY_SIMPL_CMD_SIZE
+        && memcmp(buf->cmd, MSG_HEADER_HELLO, CMD_LEN) == 0) {
         return req_type::hello;
     }
-    if (memcmp(buf->cmd, MSG_HEADER_DEL, CMD_LEN) == 0
-        && msg_len > EMPTY_SIMPL_CMD_SIZE) {
+    if (msg_len > EMPTY_SIMPL_CMD_SIZE
+        && memcmp(buf->cmd, MSG_HEADER_DEL, CMD_LEN) == 0) {
         return req_type::remove;
     }
-    if (memcmp(buf->cmd, MSG_HEADER_LIST, CMD_LEN) == 0
-        && msg_len >= EMPTY_SIMPL_CMD_SIZE) {
+    if (msg_len >= EMPTY_SIMPL_CMD_SIZE
+        && memcmp(buf->cmd, MSG_HEADER_LIST, CMD_LEN) == 0) {
         return (msg_len == EMPTY_SIMPL_CMD_SIZE ? req_type::list_all : req_type::list_exp);
     }
-    if (memcmp(buf->cmd, MSG_HEADER_GET, CMD_LEN) == 0
-        && msg_len > EMPTY_SIMPL_CMD_SIZE) {
+    if (msg_len > EMPTY_SIMPL_CMD_SIZE
+        && memcmp(buf->cmd, MSG_HEADER_GET, CMD_LEN) == 0) {
         return req_type::download;
     }
-    if (memcmp(buf->cmd, MSG_HEADER_ADD, CMD_LEN) == 0
-        && msg_len > EMPTY_CMPLX_CMD_SIZE) {
+    if (msg_len > EMPTY_CMPLX_CMD_SIZE
+        && memcmp(buf->cmd, MSG_HEADER_ADD, CMD_LEN) == 0) {
         return req_type::upload;
     }
     return req_type::invalid;
 }
 
+//checked
 int main(int argc, char *argv[]) {
     int sock;
     std::vector<std::string> filenames;
@@ -370,36 +390,36 @@ int main(int argc, char *argv[]) {
             perror("Recvfrom error\n");
             continue;
         }
-        std::cout << "msg received\n";
+        std::cout << "Message received\n";
         switch (parse_req_type(&buffer, msg_len)) {
             case req_type::hello:
-                if (!do_hello(sock, (struct SIMPL_CMD *) &buffer) {
-                    std::cerr << "Error replying to hello\n";
+                if (!do_hello(sock, (struct SIMPL_CMD *) &buffer)) {
+                    perror("Error replying to hello\n");
                 }
                 break;
             case req_type::remove:
                 if (!do_remove((struct SIMPL_CMD *) &buffer, msg_len, filenames)) {
-                    std::cerr << "Error removing file\n";
+                    perror("Error removing file\n");
                 }
                 break;
             case req_type::list_all:
                 if (!do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, filenames, false)) {
-                    std::cerr << "Error sending list\n";
+                    perror("Error sending list\n");
                 }
                 break;
             case req_type::list_exp:
                 if (!do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, filenames, true)) {
-                    std::cerr << "Error sending list\n";
+                    perror("Error sending list\n");
                 }
                 break;
             case req_type::download:
                 if (!do_send(sock, (struct SIMPL_CMD *) &buffer, msg_len, filenames)) {
-                    std::cerr << "Error starting file transmission to client\n";
+                    perror("Error starting file transmission to client\n");
                 }
                 break;
             case req_type::upload:
                 if (!do_receive(sock, (struct CMPLX_CMD *) &buffer, msg_len, filenames)) {
-                    std::cerr << "Error starting file transmission from client\n";
+                    perror("Error starting file transmission from client\n");
                 }
                 break;
             case req_type::invalid:

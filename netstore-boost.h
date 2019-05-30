@@ -25,6 +25,7 @@ extern struct server_config s_config;
 extern struct client_config c_config;
 
 bool parse_client_args(int argc, char **argv);
+
 bool parse_server_args(int argc, char **argv);
 
 #endif //NETSTORE_NETSTORE_BOOST_H

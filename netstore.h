@@ -21,6 +21,7 @@
 static constexpr int UDP_DATA_SIZE = 65507;
 static constexpr int TCP_BUFFER_SIZE = 524288;
 static constexpr int CMD_LEN = 10;
+
 static constexpr int SIMPL_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN - sizeof(uint64_t);
 static constexpr int CMPLX_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN - sizeof(uint64_t) - sizeof(uint64_t);
 static constexpr int BUF_CMD_DATA_SIZE = UDP_DATA_SIZE - CMD_LEN;
@@ -56,10 +57,6 @@ struct BUF_CMD {
     char cmd[CMD_LEN];
     char data[BUF_CMD_DATA_SIZE];
 }__attribute__((packed));
-
-static_assert(sizeof(SIMPL_CMD) == UDP_DATA_SIZE);
-static_assert(sizeof(CMPLX_CMD) == UDP_DATA_SIZE);
-static_assert(sizeof(BUF_CMD) == UDP_DATA_SIZE);
 
 bool cmd_send(int socket, void *cmd, size_t msg_len, struct sockaddr_in *address);
 

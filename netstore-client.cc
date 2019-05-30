@@ -295,7 +295,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
     }
 
     std::cout << "do_search()\n";
-    if (!cmd_send(socket, &simple, (size_t) EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+    if (!cmd_send(socket, &simple, msg_size, &remote_multicast_address)) {
         perror("Couldn't send LIST message");
         return;
     }
