@@ -219,11 +219,11 @@ bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
     std::sort(filenames.begin(), filenames.end());
 
     int left_space = SIMPL_CMD_DATA_SIZE;
-    memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
+    memset(reply.data, '\n', SIMPL_CMD_DATA_SIZE);
 
     for (auto it = filenames.begin(); it != filenames.end();) {
         int filename_len = it->length();
-        if (filename_len >= SIMPL_CMD_DATA_SIZE){
+        if (SIMPL_CMD_DATA_SIZE <= filename_len) {
             return false;
         }
 
@@ -232,9 +232,10 @@ bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
                 return false;
             }
             left_space = SIMPL_CMD_DATA_SIZE;
-            memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
+            memset(reply.data, '\n', SIMPL_CMD_DATA_SIZE);
+            continue;
         } else {
-            snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len, "%s", it->c_str());
+            snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len + 1, "%s", it->c_str());
             reply.data[SIMPL_CMD_DATA_SIZE - left_space + filename_len] = '\n';
             left_space -= (filename_len + 1);
             it++;
@@ -369,6 +370,7 @@ req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
     return req_type::invalid;
 }
 
+//checked
 void sigint_handler(int signal) {
     quick_exit(0);
 }

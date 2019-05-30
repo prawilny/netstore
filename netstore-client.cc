@@ -67,9 +67,10 @@ bool parse_command(struct command *c) {
 
     getline(linestream, c->arg);
     bool arg_present = false;
-    for (auto it = c->arg.begin(); it != c->arg.end(); it++) {
-        if (*it != ' ') {
+    for (int i = 0 ; i <c->arg.length(); i++) {
+        if (c->arg[i] != ' ') {
             arg_present = true;
+            c->arg = c->arg.substr(i, c->arg.length());
             break;
         }
     }
