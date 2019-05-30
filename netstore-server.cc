@@ -62,7 +62,7 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
         || fdncpy(fd, sock_fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
         std::cerr << "Something went wrong receiving\n";
         remove(filename);
-    } else{
+    } else {
         std::cout << "Upload succesful.\n";
     }
 
@@ -216,29 +216,32 @@ bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
         }
     }
 
-    if (!filenames.empty()) {
-        std::sort(filenames.begin(), filenames.end());
+    std::sort(filenames.begin(), filenames.end());
 
-        int left_space;
-        for (auto it = filenames.begin(); it != filenames.end();) {
-            memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
-            left_space = SIMPL_CMD_DATA_SIZE;
+    int left_space = SIMPL_CMD_DATA_SIZE;
+    memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
 
-            for (; it != filenames.end(); it++) {
-                int filename_len = it->length() + 1;
-                if (left_space < filename_len) {
-                    if (!cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address)) {
-                        return false;
-                    }
-                    break;
-                }
-
-                snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len, "%s", it->c_str());
-                reply.data[SIMPL_CMD_DATA_SIZE - left_space + filename_len - 1] = '\n';
-                left_space -= filename_len;
-            }
+    for (auto it = filenames.begin(); it != filenames.end();) {
+        int filename_len = it->length();
+        if (filename_len >= SIMPL_CMD_DATA_SIZE){
+            return false;
         }
-        return cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address); //added last filename to reply
+
+        if (left_space <= filename_len) {
+            if (!cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address)) {
+                return false;
+            }
+            left_space = SIMPL_CMD_DATA_SIZE;
+            memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
+        } else {
+            snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len, "%s", it->c_str());
+            reply.data[SIMPL_CMD_DATA_SIZE - left_space + filename_len] = '\n';
+            left_space -= (filename_len + 1);
+            it++;
+        }
+        if (it == filenames.end()) {
+            return cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address);
+        }
     }
 
     return true;
@@ -301,7 +304,7 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
     size_t file_size;
     struct sockaddr_in tcp_address;
     char buffer[SIMPL_CMD_DATA_SIZE];
-    int data_len = req_len - EMPTY_SIMPL_CMD_SIZE
+    int data_len = req_len - EMPTY_SIMPL_CMD_SIZE;
 
     memcpy(buffer, request->data, data_len);
     buffer[data_len] = '\0';
@@ -365,12 +368,20 @@ req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
     return req_type::invalid;
 }
 
+void sigint_handler(int signal) {
+    quick_exit(0);
+}
+
 //checked
 int main(int argc, char *argv[]) {
     int sock;
     std::vector<std::string> filenames;
     struct BUF_CMD buffer;
     ssize_t msg_len;
+
+    if (signal(SIGINT, sigint_handler) == SIG_ERR) {
+        return 9;
+    }
 
     if (!parse_server_args(argc, argv)) {
         return 1;
