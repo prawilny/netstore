@@ -333,6 +333,7 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
     memcpy(msg.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN);
     msg.param = htobe64((uint64_t) tcp_port);
 
+    s_config.free_space -= file_size;
     bool msg_sent = cmd_send(sock, &msg, req_len, &client_address);
 
     std::thread worker(work_receive, tcp_sock, fd, file_size, filename.c_str());

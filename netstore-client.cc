@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <netdb.h>
 
+//todo make cmd_seq sequential (static counter and so on)
+
 static constexpr int MULTICAST_UDP_TTL_VALUE = 4;
 
 enum class cmd_type {
@@ -39,6 +41,8 @@ extern struct client_config c_config;
 struct sockaddr_in local_address;
 struct sockaddr_in remote_multicast_address;
 
+//todo check again (esp. no argument situation)
+//checked
 bool parse_command(struct command *c) {
     std::string line, token;
 
@@ -46,8 +50,8 @@ bool parse_command(struct command *c) {
         std::cerr << "Error reading line\n";
         return false;
     }
-    std::istringstream linestream(line);
 
+    std::istringstream linestream(line);
     if (!(linestream >> token)) {
         return false;
     }
@@ -61,44 +65,38 @@ bool parse_command(struct command *c) {
         }
     }
 
-    //todo whitespace as first argument...
-
-    //todo whitespacce in filename
-
-    int args = 0;
-    if (!linestream.eof()) {
-        args++;
-        linestream >> c->arg;
-
-        if (!linestream.eof()) {
-            args++;
+    getline(linestream, c->arg);
+    bool arg_present = false;
+    for (auto it = c->arg.begin(); it != c->arg.end(); it++) {
+        if (*it != ' ') {
+            arg_present = true;
+            break;
         }
     }
 
     switch (c->type) {
         case cmd_type::discover:
         case cmd_type::exit:
-            return args == 0;
+            return !arg_present;
         case cmd_type::fetch:
         case cmd_type::upload:
         case cmd_type::remove:
-            return args == 1;
+            return arg_present;
         case cmd_type::search:
-            switch (args) {
-                case 0:
+            switch (arg_present) {
+                case false:
                     c->type = cmd_type::search_all;
                     return true;
-                case 1:
+                case true:
                     c->type = cmd_type::search_exp;
                     return true;
-                default:
-                    return false;
             }
         default:
             return false;
     }
 }
 
+//checked
 int tcp_socket(std::string host, int port) {
     struct addrinfo addr_hints;
     struct addrinfo *addr_result;
@@ -127,6 +125,7 @@ int tcp_socket(std::string host, int port) {
     return -1;
 }
 
+//checked
 int udp_socket() {
     int sock;
 
@@ -134,15 +133,13 @@ int udp_socket() {
     int ttl_val = MULTICAST_UDP_TTL_VALUE;
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        std::cerr << "socket\n";
-        perror(NULL);
+        perror("socket");
         return -1;
     }
 
     if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl_val, sizeof(ttl_val)) == -1
         || setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast_flag, sizeof(broadcast_flag)) == -1) {
-        std::cerr << "setsockopt\n";
-        perror(NULL);
+        perror("setsockopt");
         close(sock);
         return -1;
     }
@@ -151,8 +148,7 @@ int udp_socket() {
     local_address.sin_addr.s_addr = htonl(INADDR_ANY);
     local_address.sin_port = htons(0);
     if (bind(sock, (struct sockaddr *) &local_address, sizeof(local_address)) == -1) {
-        std::cerr << "bind\n";
-        perror(NULL);
+        perror("bind");
         close(sock);
         return -1;
     }
@@ -160,8 +156,7 @@ int udp_socket() {
     remote_multicast_address.sin_family = AF_INET;
     remote_multicast_address.sin_port = htons((uint16_t) c_config.server_port);
     if (inet_aton(c_config.server_address.c_str(), &remote_multicast_address.sin_addr) == 0) {
-        std::cerr << "inet_aton\n";
-        perror(NULL);
+        perror("inet_aton");
         close(sock);
         return -1;
     }
@@ -169,10 +164,12 @@ int udp_socket() {
     return sock;
 }
 
+//checked
 void do_exit() {
-    exit(0);
+    quick_exit(0);
 }
 
+//checked
 void work_download(int sfd, int fd, std::filesystem::path file_node, std::string server_ip, int server_port) {
     std::error_code ec;
     std::string filename = file_node.filename();
@@ -203,6 +200,7 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
     return;
 }
 
+//checked
 void work_upload(int sfd, int fd, size_t filesize, std::string fname, std::string server_ip, int server_port) {
     std::error_code ec;
     char buffer[TCP_BUFFER_SIZE];
@@ -220,7 +218,7 @@ void work_upload(int sfd, int fd, size_t filesize, std::string fname, std::strin
     }
 }
 
-
+//checked
 void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>> &servers_available) {
     uint64_t seq = (uint64_t) rand();
     struct SIMPL_CMD simple;
@@ -258,6 +256,7 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
     std::cout << "do_discover() returns\n";
 }
 
+//checked
 void do_remove(int socket, struct command *cmd) {
     struct SIMPL_CMD simple;
 
@@ -272,6 +271,7 @@ void do_remove(int socket, struct command *cmd) {
     }
 }
 
+//checked
 void
 do_search(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
     uint64_t seq = (uint64_t) rand();
@@ -302,12 +302,13 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
     std::cout << "LIST sent\n";
 
     while ((rcvd = cmd_recvfrom_timed(socket, &simple, &server_address, &timeout)) != -1) {
-        if (be64toh(simple.cmd_seq) != seq || strncmp(MSG_HEADER_MY_LIST, simple.cmd, CMD_LEN) != 0) {
+        if (rcvd <= EMPTY_SIMPL_CMD_SIZE || be64toh(simple.cmd_seq) != seq
+            || strncmp(MSG_HEADER_MY_LIST, simple.cmd, CMD_LEN) != 0) {
             pckg_error("wrong message metadata (searching)", &server_address);
             continue;
         }
 
-        simple.data[rcvd - CMD_LEN - sizeof(simple.cmd_seq)] = '\0';
+        simple.data[rcvd - EMPTY_SIMPL_CMD_SIZE] = '\0';
         for (char *token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
             std::cout << "{" << token << "}" << "{" << inet_ntoa(server_address.sin_addr) << "}\n";
             files_available.insert(std::make_pair(token, server_address));
@@ -316,6 +317,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
     std::cout << "do_search() returns\n";
 }
 
+//checked
 void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
     struct SIMPL_CMD req;
     struct CMPLX_CMD res;
@@ -326,26 +328,21 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     int sfd;
     std::error_code ec;
     std::string filepath(c_config.download_folder + "/" + cmd->arg);
-    auto fileservers = files_available.find(cmd->arg);
+    std::filesystem::path file_node(filepath);
     ssize_t rcvd;
 
-    if (fileservers == files_available.end()) {
+    if (files_available.find(cmd->arg) == files_available.end()) {
         std::cerr << "File not among last search results.\n";
         return;
     }
-    if (access(filepath.c_str(), F_OK) == 0) {
-        std::cerr << "File already exists.\n";
-        return;
-    }
-    if ((fd = open(filepath.c_str(), O_CREAT | O_WRONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
+    if ((fd = open(filepath.c_str(), O_CREAT | O_EXCL | O_WRONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
         std::cerr << "Couldn't open file.\n";
         return;
     }
-    std::filesystem::path file_node(filepath);
 
     bool connected = false;
     struct sockaddr_in sockaddr;
-    for (auto it = fileservers; !connected && it != files_available.end(); it++) {
+    for (auto it = files_available.find(cmd->arg); !connected && it != files_available.end(); it++) {
         seq = (uint64_t) rand();
         sockaddr = it->second;
 
@@ -366,7 +363,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
             || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
             || strncmp(cmd->arg.c_str(), res.data, SIMPL_CMD_DATA_SIZE) != 0) {
             if (rcvd != -1) {
-                pckg_error("Wrong message format", &sockaddr);
+                pckg_error("Wrong message metadata", &sockaddr);
             }
             continue;
         }
@@ -392,6 +389,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     return;
 }
 
+//checked
 void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in, uint64_t>> &servers_available) {
     std::sort(servers_available.begin(), servers_available.end(), [](auto &left, auto &right) {
         return left.second < right.second;
@@ -456,7 +454,7 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
                            sockaddr.sin_port);
         worker.detach();
     } else {
-        std::cerr << "No server could accept file " << cmd->arg << ".\n";
+        std::cerr << "File " << cmd->arg << " too big\n";
     }
 
     close(sfd);
@@ -465,6 +463,7 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
     return;
 }
 
+//checked
 int main(int argc, char *argv[]) {
     int sock;
     struct command cmd;
