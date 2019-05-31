@@ -46,8 +46,10 @@ struct sockaddr_in remote_multicast_address;
 bool parse_command(struct command *c) {
     std::string line, token;
 
+    c->arg = "";
+
     if (!getline(std::cin, line)) {
-        std::cerr << "Error reading line\n";
+        perror("Error reading line");
         return false;
     }
 
@@ -67,7 +69,7 @@ bool parse_command(struct command *c) {
 
     getline(linestream, c->arg);
     bool arg_present = false;
-    for (int i = 0 ; i <c->arg.length(); i++) {
+    for (int i = 0; i < c->arg.length(); i++) {
         if (c->arg[i] != ' ') {
             arg_present = true;
             c->arg = c->arg.substr(i, c->arg.length());
@@ -108,18 +110,21 @@ int tcp_socket(std::string host, int port) {
     addr_hints.ai_protocol = IPPROTO_TCP;
 
     if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &addr_hints, &addr_result) != 0) {
+        perror("getaddrinfo");
         return -1;
     }
 
     for (struct addrinfo *rp = addr_result; rp != NULL; rp = rp->ai_next) {
         int sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sfd == -1) {
+            perror("socket (nonfatal)");
             continue;
         }
         if (connect(sfd, rp->ai_addr, rp->ai_addrlen) == 0) {
             freeaddrinfo(addr_result);
             return sfd;
         }
+        perror("connect");
         close(sfd);
     }
     freeaddrinfo(addr_result);
@@ -304,7 +309,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
 
     while ((rcvd = cmd_recvfrom_timed(socket, &simple, &server_address, &timeout)) != -1) {
         if (rcvd <= EMPTY_SIMPL_CMD_SIZE || be64toh(simple.cmd_seq) != seq
-            || strncmp(MSG_HEADER_MY_LIST, simple.cmd, CMD_LEN) != 0) {
+            || memcmp(MSG_HEADER_MY_LIST, simple.cmd, CMD_LEN) != 0) {
             pckg_error("wrong message metadata (searching)", &server_address);
             continue;
         }
@@ -325,8 +330,8 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     struct timeval timeout;
 
     uint64_t seq;
-    int fd;
-    int sfd;
+    int fd = -1;
+    int sfd = -1;
     std::error_code ec;
     std::string filepath(c_config.download_folder + "/" + cmd->arg);
     std::filesystem::path file_node(filepath);
@@ -343,7 +348,9 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
 
     bool connected = false;
     struct sockaddr_in sockaddr;
-    for (auto it = files_available.find(cmd->arg); !connected && it != files_available.end(); it++) {
+    for (auto it = files_available.equal_range(cmd->arg).first;
+         !connected && it != files_available.equal_range(cmd->arg).second;
+         it++) {
         seq = (uint64_t) rand();
         sockaddr = it->second;
 
@@ -362,14 +369,15 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
         rcvd = cmd_recvfrom_timed(socket, &res, &sockaddr, &timeout);
         if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(res.cmd_seq) != seq
             || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
-            || strncmp(cmd->arg.c_str(), res.data, SIMPL_CMD_DATA_SIZE) != 0) {
+            || memcmp(cmd->arg.c_str(), res.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
             if (rcvd != -1) {
                 pckg_error("Wrong message metadata", &sockaddr);
             }
             continue;
         }
 
-        if ((sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(res.param))) == -1) {
+        sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(res.param));
+        if (sfd == -1) {
             continue;
         }
         connected = true;
@@ -382,12 +390,9 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     } else {
         std::cerr << "Couldn't reach any server hosting file " << cmd->arg << ".\n";
         std::filesystem::remove(file_node, ec);
+        close(sfd);
+        close(fd);
     }
-
-    close(sfd);
-    close(fd);
-
-    return;
 }
 
 //checked
@@ -398,9 +403,10 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
 
     uint64_t seq;
     int fd;
-    int sfd;
+    int sfd = -1;
     ssize_t rcvd;
 
+    //todo fix relative path open()
     if ((fd = open(cmd->arg.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
         std::cerr << "Couldn't open file.\n";
         return;
@@ -422,10 +428,11 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
 
         memcpy(msg.cmd, MSG_HEADER_ADD, CMD_LEN);
         msg.cmd_seq = htobe64(seq);
-        snprintf(msg.data, CMPLX_CMD_DATA_SIZE, "%s", cmd->arg.c_str());
+        msg.param = htobe64(filesize);
+        snprintf(msg.data, CMPLX_CMD_DATA_SIZE, "%s", filename.c_str());
 
         if (!cmd_send(sock, &msg,
-                      (size_t) EMPTY_CMPLX_CMD_SIZE + std::min(cmd->arg.length(), (size_t) CMPLX_CMD_DATA_SIZE),
+                      (size_t) EMPTY_CMPLX_CMD_SIZE + std::min(filename.length(), (size_t) CMPLX_CMD_DATA_SIZE),
                       &sockaddr)) {
             continue;
         }
@@ -436,15 +443,18 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
 
         if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(msg.cmd_seq) != seq
             || memcmp(msg.cmd, MSG_HEADER_CAN_ADD, CMD_LEN) != 0
-            || strncmp(cmd->arg.c_str(), msg.data, SIMPL_CMD_DATA_SIZE) != 0) {
-            if (rcvd != -1) {
+            || strncmp(cmd->arg.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
+            if (rcvd != -1
+                && !(rcvd == EMPTY_SIMPL_CMD_SIZE
+                     && msg.cmd_seq == seq
+                     && memcmp(msg.cmd, MSG_HEADER_NO_WAY, CMD_LEN) == 0)) {
                 pckg_error("Wrong message format", &sockaddr);
             }
-            //"NO_WAY" message ends up here
             continue;
         }
 
-        if ((sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(msg.param))) == -1) {
+        sfd = tcp_socket(inet_ntoa(sockaddr.sin_addr), be64toh(msg.param));
+        if (sfd == -1) {
             continue;
         }
         connected = true;
@@ -456,12 +466,9 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
         worker.detach();
     } else {
         std::cerr << "File " << cmd->arg << " too big\n";
+        close(sfd);
+        close(fd);
     }
-
-    close(sfd);
-    close(fd);
-
-    return;
 }
 
 //checked
