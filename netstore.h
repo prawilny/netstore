@@ -65,7 +65,7 @@ ssize_t cmd_recvfrom(int sock, void *buffer, struct sockaddr_in *from);
 
 ssize_t cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, struct timeval *timeout);
 
-void pckg_error(const char *msg, struct sockaddr_in *address);
+void pckg_error(std::mutex * m, const char *msg, const char * host, int port);
 
 ssize_t writen(int fd, const void *vptr, size_t n);
 
