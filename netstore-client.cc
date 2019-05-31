@@ -6,8 +6,6 @@
 #include <cstdlib>
 #include <netdb.h>
 
-//todo make cmd_seq sequential (static counter and so on)
-
 static constexpr int MULTICAST_UDP_TTL_VALUE = 4;
 
 static int seq_counter = 1;
@@ -42,16 +40,17 @@ struct command {
 extern struct client_config c_config;
 struct sockaddr_in local_address;
 struct sockaddr_in remote_multicast_address;
+std::mutex mutex_print;
 
 //todo check again (esp. no argument situation)
-//checked
 bool parse_command(struct command *c) {
     std::string line, token;
 
     c->arg = "";
+    c->type = cmd_type::invalid;
 
     if (!getline(std::cin, line)) {
-        perror("Error reading line");
+        //perror("Error reading line");
         return false;
     }
 
@@ -61,7 +60,6 @@ bool parse_command(struct command *c) {
     }
     std::transform(token.begin(), token.end(), token.begin(), ::tolower);
 
-    c->type = cmd_type::invalid;
     for (auto it = command_types.begin(); it != command_types.end(); it++) {
         if (token.compare(it->first) == 0) {
             c->type = it->second;
@@ -101,7 +99,7 @@ bool parse_command(struct command *c) {
     }
 }
 
-//checked
+
 int tcp_socket(std::string host, int port) {
     struct addrinfo addr_hints;
     struct addrinfo *addr_result;
@@ -112,28 +110,28 @@ int tcp_socket(std::string host, int port) {
     addr_hints.ai_protocol = IPPROTO_TCP;
 
     if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &addr_hints, &addr_result) != 0) {
-        perror("getaddrinfo");
+        //perror("getaddrinfo");
         return -1;
     }
 
     for (struct addrinfo *rp = addr_result; rp != NULL; rp = rp->ai_next) {
         int sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sfd == -1) {
-            perror("socket (nonfatal)");
+            //perror("socket (nonfatal)");
             continue;
         }
         if (connect(sfd, rp->ai_addr, rp->ai_addrlen) == 0) {
             freeaddrinfo(addr_result);
             return sfd;
         }
-        perror("connect");
+        //perror("connect");
         close(sfd);
     }
     freeaddrinfo(addr_result);
     return -1;
 }
 
-//checked
+
 int udp_socket() {
     int sock;
 
@@ -141,13 +139,13 @@ int udp_socket() {
     int ttl_val = MULTICAST_UDP_TTL_VALUE;
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        perror("socket");
+        //perror("socket");
         return -1;
     }
 
     if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl_val, sizeof(ttl_val)) == -1
         || setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast_flag, sizeof(broadcast_flag)) == -1) {
-        perror("setsockopt");
+        //perror("setsockopt");
         close(sock);
         return -1;
     }
@@ -156,7 +154,7 @@ int udp_socket() {
     local_address.sin_addr.s_addr = htonl(INADDR_ANY);
     local_address.sin_port = htons(0);
     if (bind(sock, (struct sockaddr *) &local_address, sizeof(local_address)) == -1) {
-        perror("bind");
+        //perror("bind");
         close(sock);
         return -1;
     }
@@ -164,7 +162,7 @@ int udp_socket() {
     remote_multicast_address.sin_family = AF_INET;
     remote_multicast_address.sin_port = htons((uint16_t) c_config.server_port);
     if (inet_aton(c_config.server_address.c_str(), &remote_multicast_address.sin_addr) == 0) {
-        perror("inet_aton");
+        //perror("inet_aton");
         close(sock);
         return -1;
     }
@@ -172,12 +170,12 @@ int udp_socket() {
     return sock;
 }
 
-//checked
+
 void do_exit() {
     quick_exit(0);
 }
 
-//checked
+
 void work_download(int sfd, int fd, std::filesystem::path file_node, std::string server_ip, int server_port) {
     std::string filename = file_node.filename();
 
@@ -185,8 +183,12 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
     ssize_t rcvd;
     while ((rcvd = readn(sfd, buffer, TCP_BUFFER_SIZE)) > 0) {
         if (writen(fd, buffer, rcvd) != rcvd) {
-            std::cerr << "File {" << filename << "} downloading failed ({" << server_ip << "}:{" << server_port
-                      << "}) {" << "couldn't write to file.}";
+            {
+                mutex_print.lock();
+                printf("File %s downloading failed (%s:%d). Couldn't write to file.", file_node.filename().c_str(),
+                       server_ip.c_str(), server_port);
+                mutex_print.unlock();
+            }
             unlink(file_node.c_str());
             close(fd);
             close(sfd);
@@ -197,17 +199,24 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
     close(sfd);
 
     if (rcvd == -1) {
-        std::cerr << "File {" << filename << "} downloading failed ({" << server_ip << "}:{" << server_port
-                  << "}) {" << "couldn't read from socket.}";
+        {
+            mutex_print.lock();
+            printf("File %s downloading failed (%s:%d). Couldn't read from socket.", file_node.filename().c_str(),
+                   server_ip.c_str(), server_port);
+            mutex_print.unlock();
+        }
         unlink(file_node.c_str());
         return;
     }
 
-    std::cout << "File {" << filename << "} downloaded ({" << server_ip << "}:{" << server_port << "})";
+    {
+        mutex_print.lock();
+        printf("File %s downloaded (%s:%d)", file_node.filename().c_str(), server_ip.c_str(), server_port);
+        mutex_print.unlock();
+    }
     return;
 }
 
-//checked
 void work_upload(int sfd, int fd, size_t filesize, std::string fname, std::string server_ip, int server_port) {
     std::error_code ec;
     char buffer[TCP_BUFFER_SIZE];
@@ -218,14 +227,20 @@ void work_upload(int sfd, int fd, size_t filesize, std::string fname, std::strin
     close(fd);
 
     if (result == -1) {
-        std::cout << "File {" << fname << "} uploading failed ({" << server_ip << "}:{" << server_port << "})"
-                  << "Couldn't write  to socket.";
+        {
+            mutex_print.lock();
+            printf("File %s uploading failed (%s:%d). fdncpy failed.", fname.c_str(), server_ip.c_str(), server_port);
+            mutex_print.unlock();
+        }
     } else {
-        std::cout << "File {" << fname << "} uploaded ({" << server_ip << "}:{" << server_port << "})";
+        {
+            mutex_print.lock();
+            printf("File %s uploaded (%s:%d)", fname.c_str(), server_ip.c_str(), server_port);
+            mutex_print.unlock();
+        }
     }
 }
 
-//checked
 void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>> &servers_available) {
     uint64_t seq = seq_counter++;
     struct SIMPL_CMD simple;
@@ -242,28 +257,34 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
     memcpy(simple.cmd, MSG_HEADER_HELLO, CMD_LEN);
     simple.cmd_seq = htobe64(seq);
 
-    std::cout << "do_discover()\n";
+    //std::cout << "do_discover()\n";
     if (!cmd_send(socket, &simple, (size_t) EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
-        perror("Couldn't send HELLO message");
+        //perror("Couldn't send HELLO message");
         return;
     }
-    std::cout << "HELLO sent\n";
+    //std::cout << "HELLO sent\n";
 
     while ((rcvd = cmd_recvfrom_timed(socket, &complex, &server_address, &timeout)) != -1) {
         if (be64toh(complex.cmd_seq) != seq || memcmp(MSG_HEADER_GOOD_DAY, complex.cmd, CMD_LEN) != 0) {
-            pckg_error("wrong message metadata (discovering)", &server_address);
+            pckg_error(&mutex_print, "Wrong message metadata", inet_ntoa(server_address.sin_addr),
+                       ntohs(server_address.sin_port));
             continue;
         }
         std::string server_ip(inet_ntoa(server_address.sin_addr));
         uint64_t server_space = be64toh(complex.param);
         servers_available.push_back(std::make_pair(server_address, server_space));
-        std::cout << "Found " << server_ip << "(" << c_config.server_address << ") with free space " << server_space
-                  << std::endl;
+
+        {
+            mutex_print.lock();
+            printf("Found %s  (%s) with free space %ld", server_ip.c_str(), c_config.server_address.c_str(), server_space);
+            mutex_print.unlock();
+        }
+
     }
-    std::cout << "do_discover() returns\n";
+    //std::cout << "do_discover() returns\n";
 }
 
-//checked
+
 void do_remove(int socket, struct command *cmd) {
     struct SIMPL_CMD simple;
 
@@ -274,11 +295,11 @@ void do_remove(int socket, struct command *cmd) {
     if (!cmd_send(socket, &simple,
                   (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
                   &remote_multicast_address)) {
-        perror("Couldn't send DEL message");
+        //perror("Couldn't send DEL message");
     }
 }
 
-//checked
+
 void
 do_search(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
     uint64_t seq = seq_counter++;
@@ -301,30 +322,34 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
         msg_size += std::min(SIMPL_CMD_DATA_SIZE, (int) cmd->arg.length());
     }
 
-    std::cout << "do_search()\n";
+    //std::cout << "do_search()\n";
     if (!cmd_send(socket, &simple, msg_size, &remote_multicast_address)) {
-        perror("Couldn't send LIST message");
+        //perror("Couldn't send LIST message");
         return;
     }
-    std::cout << "LIST sent\n";
+    //std::cout << "LIST sent\n";
 
     while ((rcvd = cmd_recvfrom_timed(socket, &simple, &server_address, &timeout)) != -1) {
         if (rcvd <= EMPTY_SIMPL_CMD_SIZE || be64toh(simple.cmd_seq) != seq
             || memcmp(MSG_HEADER_MY_LIST, simple.cmd, CMD_LEN) != 0) {
-            pckg_error("wrong message metadata (searching)", &server_address);
+            pckg_error(&mutex_print, "Wrong message metadata", inet_ntoa(server_address.sin_addr),
+                       ntohs(server_address.sin_port));
             continue;
         }
 
         simple.data[rcvd - EMPTY_SIMPL_CMD_SIZE] = '\0';
         for (char *token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
-            std::cout << "{" << token << "}" << "{" << inet_ntoa(server_address.sin_addr) << "}\n";
+            {
+                mutex_print.lock();
+                printf("%s %s", token, inet_ntoa(server_address.sin_addr));
+                mutex_print.unlock();
+            }
             files_available.insert(std::make_pair(token, server_address));
         }
     }
     std::cout << "do_search() returns\n";
 }
 
-//checked
 void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
     struct SIMPL_CMD req;
     struct CMPLX_CMD res;
@@ -338,11 +363,11 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     ssize_t rcvd;
 
     if (files_available.find(cmd->arg) == files_available.end()) {
-        std::cerr << "File not among last search results.\n";
+        //std::cerr << "File not among last search results.\n";
         return;
     }
     if ((fd = open(filepath.c_str(), O_CREAT | O_EXCL | O_WRONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
-        std::cerr << "Couldn't open file.\n";
+        //std::cerr << "Couldn't open file.\n";
         return;
     }
 
@@ -371,7 +396,8 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
             || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
             || memcmp(cmd->arg.c_str(), res.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
             if (rcvd != -1) {
-                pckg_error("Wrong message metadata", &sockaddr);
+                pckg_error(&mutex_print, "Wrong message metadata", inet_ntoa(sockaddr.sin_addr),
+                           ntohs(sockaddr.sin_port));
             }
             continue;
         }
@@ -388,14 +414,12 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
                            sockaddr.sin_port);
         worker.detach();
     } else {
-        std::cerr << "Couldn't reach any server hosting file " << cmd->arg << ".\n";
         unlink(file_node.c_str());
         close(sfd);
         close(fd);
     }
 }
 
-//checked
 void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in, uint64_t>> &servers_available) {
     std::sort(servers_available.begin(), servers_available.end(), [](auto &left, auto &right) {
         return left.second < right.second;
@@ -408,7 +432,11 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
 
     //todo fix relative path open()
     if ((fd = open(cmd->arg.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
-        std::cerr << "Couldn't open file.\n";
+        {
+            mutex_print.lock();
+            printf("File %s does not exist", cmd->arg.c_str());
+            mutex_print.unlock();
+        }
         return;
     }
 
@@ -448,7 +476,8 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
                 && !(rcvd == EMPTY_SIMPL_CMD_SIZE
                      && be64toh(msg.cmd_seq) == seq
                      && memcmp(msg.cmd, MSG_HEADER_NO_WAY, CMD_LEN) == 0)) {
-                pckg_error("Wrong message format", &sockaddr);
+                pckg_error(&mutex_print, "Wrong message metadata", inet_ntoa(sockaddr.sin_addr),
+                           ntohs(sockaddr.sin_port));
             }
             continue;
         }
@@ -465,13 +494,16 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
                            sockaddr.sin_port);
         worker.detach();
     } else {
-        std::cerr << "File " << cmd->arg << " too big\n";
+        {
+            mutex_print.lock();
+            printf("File %s too big", cmd->arg.c_str());
+            mutex_print.unlock();
+        }
         close(sfd);
         close(fd);
     }
 }
 
-//checked
 int main(int argc, char *argv[]) {
     int sock;
     struct command cmd;
