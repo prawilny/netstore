@@ -68,13 +68,13 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
 
     if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1){
         perror("select");
-        remove(file_node.c_str());
+        unlink(file_node.c_str());
     } else if ((sock_fd = accept(tcp_sock, NULL, NULL)) == -1){
         perror("accept");
-        remove(file_node.c_str());
+        unlink(file_node.c_str());
     } else if (fdncpy(fd, sock_fd, file_size, buffer, TCP_BUFFER_SIZE) == -1){
         std::cerr << "fdncpy failed";
-        remove(file_node.c_str());
+        unlink(file_node.c_str());
     } else{
         std::cout << "Upload succesful.\n";
     }
@@ -216,7 +216,7 @@ bool do_remove(struct SIMPL_CMD *request, size_t req_len, std::vector<std::strin
     if (ec) {
         s_config.free_space += f_size;
     }
-    std::filesystem::remove(file, ec);
+    unlink(file.c_str());
     return true;
 }
 
@@ -359,6 +359,8 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
 
     memcpy(response.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN);
     response.param = htobe64((uint64_t) tcp_port);
+    response.cmd_seq = request->cmd_seq;
+    memcpy(response.data, request->data, CMPLX_CMD_DATA_SIZE);
 
     s_config.free_space -= file_size;
     bool msg_sent = cmd_send(sock, &response, req_len, &client_address);

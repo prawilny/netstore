@@ -10,6 +10,8 @@
 
 static constexpr int MULTICAST_UDP_TTL_VALUE = 4;
 
+static int seq_counter = 1;
+
 enum class cmd_type {
     discover,
     search,
@@ -177,7 +179,6 @@ void do_exit() {
 
 //checked
 void work_download(int sfd, int fd, std::filesystem::path file_node, std::string server_ip, int server_port) {
-    std::error_code ec;
     std::string filename = file_node.filename();
 
     char buffer[TCP_BUFFER_SIZE];
@@ -186,7 +187,7 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
         if (writen(fd, buffer, rcvd) != rcvd) {
             std::cerr << "File {" << filename << "} downloading failed ({" << server_ip << "}:{" << server_port
                       << "}) {" << "couldn't write to file.}";
-            std::filesystem::remove(file_node, ec);
+            unlink(file_node.c_str());
             close(fd);
             close(sfd);
             return;
@@ -198,7 +199,7 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
     if (rcvd == -1) {
         std::cerr << "File {" << filename << "} downloading failed ({" << server_ip << "}:{" << server_port
                   << "}) {" << "couldn't read from socket.}";
-        std::filesystem::remove(file_node, ec);
+        unlink(file_node.c_str());
         return;
     }
 
@@ -226,7 +227,7 @@ void work_upload(int sfd, int fd, size_t filesize, std::string fname, std::strin
 
 //checked
 void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>> &servers_available) {
-    uint64_t seq = (uint64_t) rand();
+    uint64_t seq = seq_counter++;
     struct SIMPL_CMD simple;
     struct CMPLX_CMD complex;
     struct sockaddr_in server_address;
@@ -280,7 +281,7 @@ void do_remove(int socket, struct command *cmd) {
 //checked
 void
 do_search(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
-    uint64_t seq = (uint64_t) rand();
+    uint64_t seq = seq_counter++;
     struct SIMPL_CMD simple;
     struct sockaddr_in server_address;
     struct timeval timeout;
@@ -332,7 +333,6 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     uint64_t seq;
     int fd = -1;
     int sfd = -1;
-    std::error_code ec;
     std::string filepath(c_config.download_folder + "/" + cmd->arg);
     std::filesystem::path file_node(filepath);
     ssize_t rcvd;
@@ -351,7 +351,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     for (auto it = files_available.equal_range(cmd->arg).first;
          !connected && it != files_available.equal_range(cmd->arg).second;
          it++) {
-        seq = (uint64_t) rand();
+        seq = seq_counter++;
         sockaddr = it->second;
 
         memcpy(req.cmd, MSG_HEADER_GET, CMD_LEN);
@@ -389,7 +389,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
         worker.detach();
     } else {
         std::cerr << "Couldn't reach any server hosting file " << cmd->arg << ".\n";
-        std::filesystem::remove(file_node, ec);
+        unlink(file_node.c_str());
         close(sfd);
         close(fd);
     }
@@ -423,7 +423,7 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
         struct CMPLX_CMD msg;
         struct timeval timeout;
 
-        seq = (uint64_t) rand();
+        seq = seq_counter++;
         struct sockaddr_in sockaddr = it->first;
 
         memcpy(msg.cmd, MSG_HEADER_ADD, CMD_LEN);
@@ -441,12 +441,12 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
         timeout.tv_sec = c_config.timeout;
         rcvd = cmd_recvfrom_timed(sock, &msg, &sockaddr, &timeout);
 
-        if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(msg.cmd_seq) != seq
+        if (rcvd <= EMPTY_CMPLX_CMD_SIZE //|| be64toh(msg.cmd_seq) != seq
             || memcmp(msg.cmd, MSG_HEADER_CAN_ADD, CMD_LEN) != 0
-            || strncmp(cmd->arg.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
+            || memcmp(cmd->arg.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
             if (rcvd != -1
                 && !(rcvd == EMPTY_SIMPL_CMD_SIZE
-                     && msg.cmd_seq == seq
+                     && be64toh(msg.cmd_seq) == seq
                      && memcmp(msg.cmd, MSG_HEADER_NO_WAY, CMD_LEN) == 0)) {
                 pckg_error("Wrong message format", &sockaddr);
             }
