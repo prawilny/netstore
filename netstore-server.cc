@@ -16,6 +16,9 @@ enum class req_type {
 extern struct server_config s_config;
 struct sockaddr_in local_address;
 struct sockaddr_in client_address;
+std::mutex mutex_cout;
+std::mutex config_mutex;
+std::mutex files_mutex;
 
 //checked
 void work_send(int tcp_sock, int fd, size_t file_size) {
@@ -29,12 +32,6 @@ void work_send(int tcp_sock, int fd, size_t file_size) {
 
     FD_ZERO(&rfds);
     FD_SET(tcp_sock, &rfds);
-
-    /*if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1
-        || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1
-        || fdncpy(sock_fd, fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
-        std::cerr << "Something went wrong receiving\n";
-    }*/
 
     if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1){
         perror("select");
@@ -117,7 +114,7 @@ bool index_files(std::vector<std::string> &names) {
 
 //checked
 int udp_multicast_socket() {
-    int sock;
+    int sock = -1;
     struct ip_mreq ip_mreq;
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
@@ -277,8 +274,8 @@ bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
 //checked
 bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
     struct CMPLX_CMD res;
-    int fd;
-    int tcp_sock;
+    int fd = -1;
+    int tcp_sock = -1;
     int tcp_port;
     struct sockaddr_in tcp_address;
     char buffer[SIMPL_CMD_DATA_SIZE];
@@ -324,8 +321,8 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len, std::vector<st
 bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
     struct CMPLX_CMD response;
     struct SIMPL_CMD no_way;
-    int fd;
-    int tcp_sock;
+    int fd = -1;
+    int tcp_sock = -1;
     int tcp_port;
     uint64_t file_size;
     struct sockaddr_in tcp_address;
@@ -345,19 +342,21 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
     }
 
     if (std::find(filenames.begin(), filenames.end(), filename) != filenames.end()
-        || (fd = open(filepath.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG | S_IRWXO) == -1)) {
+        || ((fd = open(filepath.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG | S_IRWXO)) == -1)) {
         std::cerr << "File already present\n";
+        unlink(filepath.c_str());
         return false;
     }
 
     if ((tcp_sock = tcp_socket(&tcp_address)) == -1) {
         std::cerr << "Couldn't create socket\n";
         close(fd);
+        unlink(filepath.c_str());
         return false;
     }
     tcp_port = ntohs(tcp_address.sin_port);
 
-    memcpy(response.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN);
+    memcpy(response.cmd, MSG_HEADER_CAN_ADD, CMD_LEN);
     response.param = htobe64((uint64_t) tcp_port);
     response.cmd_seq = request->cmd_seq;
     memcpy(response.data, request->data, CMPLX_CMD_DATA_SIZE);

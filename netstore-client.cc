@@ -441,7 +441,7 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
         timeout.tv_sec = c_config.timeout;
         rcvd = cmd_recvfrom_timed(sock, &msg, &sockaddr, &timeout);
 
-        if (rcvd <= EMPTY_CMPLX_CMD_SIZE //|| be64toh(msg.cmd_seq) != seq
+        if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(msg.cmd_seq) != seq
             || memcmp(msg.cmd, MSG_HEADER_CAN_ADD, CMD_LEN) != 0
             || memcmp(cmd->arg.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
             if (rcvd != -1
