@@ -185,7 +185,7 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
         if (writen(fd, buffer, rcvd) != rcvd) {
             {
                 mutex_print.lock();
-                printf("File %s downloading failed (%s:%d). Couldn't write to file.", file_node.filename().c_str(),
+                printf("File %s downloading failed (%s:%d). Couldn't write to file.\n", file_node.filename().c_str(),
                        server_ip.c_str(), server_port);
                 mutex_print.unlock();
             }
@@ -201,7 +201,7 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
     if (rcvd == -1) {
         {
             mutex_print.lock();
-            printf("File %s downloading failed (%s:%d). Couldn't read from socket.", file_node.filename().c_str(),
+            printf("File %s downloading failed (%s:%d). Couldn't read from socket.\n", file_node.filename().c_str(),
                    server_ip.c_str(), server_port);
             mutex_print.unlock();
         }
@@ -211,7 +211,7 @@ void work_download(int sfd, int fd, std::filesystem::path file_node, std::string
 
     {
         mutex_print.lock();
-        printf("File %s downloaded (%s:%d)", file_node.filename().c_str(), server_ip.c_str(), server_port);
+        printf("File %s downloaded (%s:%d)\n", file_node.filename().c_str(), server_ip.c_str(), server_port);
         mutex_print.unlock();
     }
     return;
@@ -229,13 +229,13 @@ void work_upload(int sfd, int fd, size_t filesize, std::string fname, std::strin
     if (result == -1) {
         {
             mutex_print.lock();
-            printf("File %s uploading failed (%s:%d). fdncpy failed.", fname.c_str(), server_ip.c_str(), server_port);
+            printf("File %s uploading failed (%s:%d). fdncpy failed.\n", fname.c_str(), server_ip.c_str(), server_port);
             mutex_print.unlock();
         }
     } else {
         {
             mutex_print.lock();
-            printf("File %s uploaded (%s:%d)", fname.c_str(), server_ip.c_str(), server_port);
+            printf("File %s uploaded (%s:%d)\n", fname.c_str(), server_ip.c_str(), server_port);
             mutex_print.unlock();
         }
     }
@@ -276,7 +276,7 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
 
         {
             mutex_print.lock();
-            printf("Found %s  (%s) with free space %ld", server_ip.c_str(), c_config.server_address.c_str(), server_space);
+            printf("Found %s  (%s) with free space %ld\n", server_ip.c_str(), c_config.server_address.c_str(), server_space);
             mutex_print.unlock();
         }
 
@@ -341,7 +341,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
         for (char *token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
             {
                 mutex_print.lock();
-                printf("%s %s", token, inet_ntoa(server_address.sin_addr));
+                printf("%s %s\n", token, inet_ntoa(server_address.sin_addr));
                 mutex_print.unlock();
             }
             files_available.insert(std::make_pair(token, server_address));
@@ -434,7 +434,7 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
     if ((fd = open(cmd->arg.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
         {
             mutex_print.lock();
-            printf("File %s does not exist", cmd->arg.c_str());
+            printf("File %s does not exist\n", cmd->arg.c_str());
             mutex_print.unlock();
         }
         return;
@@ -496,7 +496,7 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
     } else {
         {
             mutex_print.lock();
-            printf("File %s too big", cmd->arg.c_str());
+            printf("File %s too big\n", cmd->arg.c_str());
             mutex_print.unlock();
         }
         close(sfd);
