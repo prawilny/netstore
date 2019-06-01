@@ -33,12 +33,6 @@ ssize_t cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, str
     return result;
 }
 
-void pckg_error(std::mutex * m, const char *msg, const char * host, int port) {
-    if (m != NULL) m->lock();
-    printf("[PCKG ERROR]  Skipping invalid package from %s:%d.%s\n", host, port, msg);
-    if (m != NULL) m->unlock();
-}
-
 ssize_t readn(int fd, void *vptr, size_t n) {
     size_t nleft;
     ssize_t nread;

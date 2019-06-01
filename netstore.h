@@ -41,6 +41,8 @@ static constexpr const char *MSG_HEADER_CONNECT_ME = "CONNECT_ME";
 static constexpr const char *MSG_HEADER_CAN_ADD = "CAN_ADD\0\0\0";
 static constexpr const char *MSG_HEADER_NO_WAY = "NO_WAY\0\0\0\0";
 
+static constexpr const char *msg_pckg_error = "[PCKG ERROR]  Skipping invalid package from %s:%d.%s\n";
+
 struct SIMPL_CMD {
     char cmd[CMD_LEN];
     uint64_t cmd_seq;
@@ -64,8 +66,6 @@ bool cmd_send(int socket, void *cmd, size_t msg_len, struct sockaddr_in *address
 ssize_t cmd_recvfrom(int sock, void *buffer, struct sockaddr_in *from);
 
 ssize_t cmd_recvfrom_timed(int sock, void *buffer, struct sockaddr_in *from, struct timeval *timeout);
-
-void pckg_error(std::mutex * m, const char *msg, const char * host, int port);
 
 ssize_t writen(int fd, const void *vptr, size_t n);
 

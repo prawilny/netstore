@@ -28,8 +28,8 @@ void work_send(int tcp_sock, int fd, size_t file_size) {
     int sock_fd = -1;
     fd_set rfds;
 
-    timeout.tv_usec = 0;
     timeout.tv_sec = s_config.timeout;
+    timeout.tv_usec = 0;
 
     FD_ZERO(&rfds);
     FD_SET(tcp_sock, &rfds);
@@ -61,7 +61,7 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
     FD_ZERO(&rfds);
     FD_SET(tcp_sock, &rfds);
 
-    if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1) {
+    /*if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1) {
         //perror("select");
         unlink(file_node.c_str());
     } else if ((sock_fd = accept(tcp_sock, NULL, NULL)) == -1) {
@@ -70,17 +70,27 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
     } else if (fdncpy(fd, sock_fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
         //std::cerr << "fdncpy failed";
         unlink(file_node.c_str());
+        {
+            mutex_space.lock();
+            s_config.free_space += file_size;
+            mutex_space.unlock();
+        }
+    } */
+    if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1
+        || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1
+        || fdncpy(fd, sock_fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
+        unlink(file_node.c_str());
+        {
+            mutex_space.lock();
+            s_config.free_space += file_size;
+            mutex_space.unlock();
+        }
     } else {
         //std::cout << "Upload succesful.\n";
         {
             mutex_files.lock();
             filenames.push_back(filename);
             mutex_files.unlock();
-        }
-        {
-            mutex_space.lock();
-            s_config.free_space += file_size;
-            mutex_space.unlock();
         }
     }
 
@@ -153,7 +163,6 @@ int udp_multicast_socket() {
     return sock;
 }
 
-
 int tcp_socket(struct sockaddr_in *tcp_address) {
     int tcp_sock = -1;
 
@@ -184,7 +193,6 @@ int tcp_socket(struct sockaddr_in *tcp_address) {
     return tcp_sock;
 }
 
-
 bool do_hello(int sock, struct SIMPL_CMD *request) {
     struct CMPLX_CMD reply;
 
@@ -194,7 +202,6 @@ bool do_hello(int sock, struct SIMPL_CMD *request) {
 
     return cmd_send(sock, &reply, EMPTY_CMPLX_CMD_SIZE, &client_address);
 }
-
 
 bool do_remove(struct SIMPL_CMD *request, size_t req_len) {
     std::error_code ec;
@@ -216,6 +223,7 @@ bool do_remove(struct SIMPL_CMD *request, size_t req_len) {
             filenames.erase(file_pos);
         }
         mutex_files.unlock();
+
         if (!file_to_delete) {
             return false;
         }
@@ -308,7 +316,7 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len) {
     std::string filepath(s_config.shared_folder + '/' + filename);
 
     std::error_code ec;
-    std::filesystem::path file_path(filepath);
+    std::filesystem::path file_node(filepath);
 
     {
         mutex_files.lock();
@@ -340,7 +348,7 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len) {
 
     bool msg_sent = cmd_send(sock, &res, EMPTY_CMPLX_CMD_SIZE + data_len, &client_address);
 
-    size_t file_size = std::filesystem::file_size(file_path, ec);
+    size_t file_size = std::filesystem::file_size(file_node, ec);
     if (!ec) {
         close(fd);
         return false;
@@ -351,7 +359,6 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len) {
 
     return msg_sent;
 }
-
 
 bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector<std::string> &filenames) {
     struct CMPLX_CMD response;
@@ -388,7 +395,6 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
 
     if ((fd = open(filepath.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
         //std::cerr << "File already present\n";
-        unlink(filepath.c_str());
         return false;
     }
 
@@ -418,7 +424,6 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
     return msg_sent;
 }
 
-
 req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
     if (msg_len == EMPTY_SIMPL_CMD_SIZE
         && memcmp(buf->cmd, MSG_HEADER_HELLO, CMD_LEN) == 0) {
@@ -443,14 +448,12 @@ req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
     return req_type::invalid;
 }
 
-
 void sigint_handler(int signal) {
     for (int i = 3; i <= MAX_FDS_OPEN; i++) {
         close(i);
     }
     quick_exit(0);
 }
-
 
 int main(int argc, char *argv[]) {
     int sock;
@@ -512,8 +515,8 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case req_type::invalid:
-                pckg_error(NULL, "Command not recognized", inet_ntoa(client_address.sin_addr),
-                           (int) ntohs(client_address.sin_port));
+                printf(msg_pckg_error, inet_ntoa(client_address.sin_addr), (int) ntohs(client_address.sin_port),
+                       "Command not recognized");
                 break;
         }
     }

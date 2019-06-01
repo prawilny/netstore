@@ -8,6 +8,13 @@
 
 static constexpr int MULTICAST_UDP_TTL_VALUE = 4;
 
+static constexpr const char * msg_downloading_failed = "File %s downloading failed (%s:%d) %s\n";
+static constexpr const char * msg_downloading_success = "File %s downloaded (%s:%d)\n";
+static constexpr const char * msg_uploading_failed = "File %s uploading failed (%s:%d) %s\n";
+static constexpr const char * msg_uploading_success = "File %s uploaded (%s:%d)\n";
+static constexpr const char * msg_file_too_big = "File %s too big\n";
+static constexpr const char * msg_file_nonexistent = "File %s does not exist\n";
+
 static int seq_counter = 1;
 
 enum class cmd_type {
@@ -99,7 +106,6 @@ bool parse_command(struct command *c) {
     }
 }
 
-
 int tcp_socket(std::string host, int port) {
     struct addrinfo addr_hints;
     struct addrinfo *addr_result;
@@ -130,7 +136,6 @@ int tcp_socket(std::string host, int port) {
     freeaddrinfo(addr_result);
     return -1;
 }
-
 
 int udp_socket() {
     int sock;
@@ -170,11 +175,9 @@ int udp_socket() {
     return sock;
 }
 
-
 void do_exit() {
     quick_exit(0);
 }
-
 
 void work_download(int sfd, int fd, std::filesystem::path file_node, std::string server_ip, int server_port) {
     std::string filename = file_node.filename();
@@ -284,7 +287,6 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
     //std::cout << "do_discover() returns\n";
 }
 
-
 void do_remove(int socket, struct command *cmd) {
     struct SIMPL_CMD simple;
 
@@ -298,7 +300,6 @@ void do_remove(int socket, struct command *cmd) {
         //perror("Couldn't send DEL message");
     }
 }
-
 
 void
 do_search(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
@@ -414,6 +415,11 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
                            sockaddr.sin_port);
         worker.detach();
     } else {
+        {
+            mutex_print.lock();
+            pritnf("File %s downloading failed (%s:%d) %s", );
+            mutex_print.unlock();
+        }
         unlink(file_node.c_str());
         close(sfd);
         close(fd);
