@@ -347,7 +347,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
             files_available.insert(std::make_pair(token, server_address));
         }
     }
-    std::cout << "do_search() returns\n";
+    //std::cout << "do_search() returns\n";
 }
 
 void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
