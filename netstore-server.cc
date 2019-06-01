@@ -230,7 +230,7 @@ bool do_remove(struct SIMPL_CMD *request, size_t req_len) {
     }
 
     f_size = std::filesystem::file_size(file, ec);
-    if (ec) {
+    if (!ec) {
         {
             mutex_space.lock();
             s_config.free_space += f_size;
@@ -333,6 +333,11 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len) {
         return false;
     }
 
+    size_t file_size = std::filesystem::file_size(file_node, ec);
+    if (ec) {
+        close(fd);
+        return false;
+    }
 
     if ((tcp_sock = tcp_socket(&tcp_address)) == -1) {
         //std::cerr << "Couldn't create socket\n";
@@ -347,12 +352,6 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len) {
     memcpy(res.data, request->data, data_len);
 
     bool msg_sent = cmd_send(sock, &res, EMPTY_CMPLX_CMD_SIZE + data_len, &client_address);
-
-    size_t file_size = std::filesystem::file_size(file_node, ec);
-    if (!ec) {
-        close(fd);
-        return false;
-    }
 
     std::thread worker(work_send, tcp_sock, fd, file_size);
     worker.detach();
