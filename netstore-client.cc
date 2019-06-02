@@ -17,7 +17,7 @@ static constexpr const char *msg_file_too_big = "File %s too big\n";
 static constexpr const char *msg_file_nonexistent = "File %s does not exist\n";
 
 static constexpr const char *msg_file_list = "%s %s\n";
-static constexpr const char *msg_server_list = "Found %s  (%s) with free space %ld\n";
+static constexpr const char *msg_server_list = "Found %s (%s) with free space %ld\n";
 static constexpr const char *msg_downloading_failed_serverless = "File %s downloading failed (:) %s\n";
 static constexpr const char *msg_uploading_failed_serverless = "File %s uploading failed (:) %s\n";
 

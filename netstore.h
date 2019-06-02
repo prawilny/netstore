@@ -41,7 +41,7 @@ static constexpr const char *MSG_HEADER_CONNECT_ME = "CONNECT_ME";
 static constexpr const char *MSG_HEADER_CAN_ADD = "CAN_ADD\0\0\0";
 static constexpr const char *MSG_HEADER_NO_WAY = "NO_WAY\0\0\0\0";
 
-static constexpr const char *msg_pckg_error = "[PCKG ERROR]  Skipping invalid package from %s:%d.%s\n";
+static constexpr const char *msg_pckg_error = "[PCKG ERROR] Skipping invalid package from %s:%d.%s\n";
 
 struct SIMPL_CMD {
     char cmd[CMD_LEN];
