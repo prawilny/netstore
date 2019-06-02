@@ -259,7 +259,7 @@ namespace netstore {
                     return false;
                 }
                 left_space = SIMPL_CMD_DATA_SIZE;
-                memset(reply.data, '\n', SIMPL_CMD_DATA_SIZE);
+                memset(reply.data, '\0', SIMPL_CMD_DATA_SIZE);
                 continue;
             } else {
                 snprintf(reply.data + (SIMPL_CMD_DATA_SIZE - left_space), filename_len + 1, "%s", it->c_str());
@@ -341,7 +341,7 @@ namespace netstore {
         uint64_t file_size;
         struct sockaddr_in tcp_address;
         char buffer[SIMPL_CMD_DATA_SIZE];
-        int data_len = req_len - EMPTY_SIMPL_CMD_SIZE;
+        int data_len = req_len - EMPTY_CMPLX_CMD_SIZE;
 
         memcpy(no_way.cmd, MSG_HEADER_NO_WAY, CMD_LEN);
         no_way.cmd_seq = request->cmd_seq;

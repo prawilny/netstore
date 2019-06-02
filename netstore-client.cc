@@ -438,6 +438,7 @@ namespace netstore {
         for (auto it = servers_available.begin(); !connected && it != servers_available.end(); it++) {
             struct CMPLX_CMD msg;
             struct timeval timeout;
+            struct SIMPL_CMD * simple_msg = (SIMPL_CMD *) &msg;
 
             seq = seq_counter++;
             sockaddr = it->first;
@@ -460,19 +461,19 @@ namespace netstore {
             bool no_way = false;
             while (!no_way && !port_received && (rcvd = cmd_recvfrom_timed(sock, &msg, &sockaddr, &timeout)) != -1) {
                 if (rcvd == EMPTY_SIMPL_CMD_SIZE + (ssize_t) filename_length
-                    && be64toh(msg.cmd_seq) == seq
-                    && memcmp(msg.cmd, MSG_HEADER_NO_WAY, CMD_LEN) == 0) {
+                    && be64toh(simple_msg->cmd_seq) == seq
+                    && memcmp(simple_msg->data, filename.c_str(), rcvd - EMPTY_SIMPL_CMD_SIZE) == 0
+                    && memcmp(simple_msg->cmd, MSG_HEADER_NO_WAY, CMD_LEN) == 0) {
                     no_way = true;
                     break;
-                } else if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(msg.cmd_seq) != seq
-                           || memcmp(msg.cmd, MSG_HEADER_CAN_ADD, CMD_LEN) != 0
-                           || memcmp(filename.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
-                    if (rcvd != -1) {
-                        printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
-                               "wrong message metadata (waiting for server port for upload)");
-                    }
-                } else {
+                } else if (rcvd > EMPTY_CMPLX_CMD_SIZE
+                           && be64toh(msg.cmd_seq) == seq
+                           && memcmp(msg.cmd, MSG_HEADER_CAN_ADD, CMD_LEN) == 0
+                           && memcmp(filename.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) == 0) {
                     port_received = true;
+                } else {
+                    printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
+                           "wrong message metadata (waiting for server port for upload)");
                 }
             }
             if (port_received) {
