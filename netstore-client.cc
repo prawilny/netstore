@@ -51,7 +51,6 @@ namespace netstore {
         std::string arg;
     };
 
-// global variables:
     extern struct client_config c_config;
     struct sockaddr_in local_address;
     struct sockaddr_in remote_multicast_address;
@@ -276,10 +275,9 @@ namespace netstore {
         simple.cmd_seq = htobe64((uint64_t) seq_counter++);
         snprintf(simple.data, SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
 
-        if (!cmd_send(socket, &simple,
-                      (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
-                      &remote_multicast_address)) {
-        }
+        cmd_send(socket, &simple,
+                 (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
+                 &remote_multicast_address);
     }
 
     void
@@ -371,16 +369,13 @@ namespace netstore {
 
             bool server_replied = false;
             while (!server_replied && (rcvd = cmd_recvfrom_timed(socket, &res, &sockaddr, &timeout)) != -1) {
-                if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(res.cmd_seq) != seq
-                    || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
-                    || memcmp(cmd.arg.c_str(), res.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
-                    if (rcvd != -1) {
-                        printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
-                               "wrong message metadata (waiting for server port for download)");
-                    }
-                    continue;
-                } else {
+                if (rcvd > EMPTY_CMPLX_CMD_SIZE && be64toh(res.cmd_seq) == seq
+                    && memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) == 0
+                    && memcmp(cmd.arg.c_str(), res.data, rcvd - EMPTY_CMPLX_CMD_SIZE) == 0) {
                     server_replied = true;
+                } else {
+                    printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
+                           "wrong message metadata (waiting for server port to download)");
                 }
             }
 
@@ -396,7 +391,7 @@ namespace netstore {
             work_download(sfd, fd, file_node, std::string(inet_ntoa(sockaddr.sin_addr)), sockaddr.sin_port);
         } else {
             printf(msg_downloading_failed_serverless, cmd.arg.c_str(),
-                   "couldn't connect any server hosting the file");
+                   "couldn't connect to any server hosting the file");
 
             unlink(file_node.c_str());
             close(sfd);
@@ -438,7 +433,7 @@ namespace netstore {
         for (auto it = servers_available.begin(); !connected && it != servers_available.end(); it++) {
             struct CMPLX_CMD msg;
             struct timeval timeout;
-            struct SIMPL_CMD * simple_msg = (SIMPL_CMD *) &msg;
+            struct SIMPL_CMD *simple_msg = (SIMPL_CMD *) &msg;
 
             seq = seq_counter++;
             sockaddr = it->first;
@@ -473,7 +468,7 @@ namespace netstore {
                     port_received = true;
                 } else {
                     printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
-                           "wrong message metadata (waiting for server port for upload)");
+                           "wrong message metadata (waiting for server port to upload)");
                 }
             }
             if (port_received) {

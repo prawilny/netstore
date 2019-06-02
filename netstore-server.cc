@@ -178,7 +178,7 @@ namespace netstore {
 
     bool do_remove(struct SIMPL_CMD *request, size_t req_len) {
         std::error_code ec;
-        int data_len = req_len = EMPTY_SIMPL_CMD_SIZE;
+        int data_len = req_len - EMPTY_SIMPL_CMD_SIZE;
         size_t f_size;
 
         char buffer[SIMPL_CMD_DATA_SIZE + 1];
