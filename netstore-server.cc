@@ -36,7 +36,9 @@ void work_send(int tcp_sock, int fd, size_t file_size) {
 
     if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1
         || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1
-        || fdncpy(sock_fd, fd, file_size, buffer, TCP_BUFFER_SIZE) == -1);
+        || fdncpy(sock_fd, fd, file_size, buffer, TCP_BUFFER_SIZE) == -1){
+        ;
+    }
 
     close(tcp_sock);
     close(fd);
