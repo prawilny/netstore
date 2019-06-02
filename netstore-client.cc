@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <netdb.h>
 #include <stdarg.h>
+#include <atomic>
 
 static constexpr int MULTICAST_UDP_TTL_VALUE = 4;
 
@@ -21,7 +22,7 @@ static constexpr const char *msg_server_list = "Found %s (%s) with free space %l
 static constexpr const char *msg_downloading_failed_serverless = "File %s downloading failed (:) %s\n";
 static constexpr const char *msg_uploading_failed_serverless = "File %s uploading failed (:) %s\n";
 
-static int seq_counter = 1;
+static std::atomic<uint64_t> seq_counter(1);
 
 enum class cmd_type {
     discover,
@@ -119,19 +120,19 @@ int tcp_socket(std::string host, int port) {
     addr_hints.ai_protocol = IPPROTO_TCP;
 
     if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &addr_hints, &addr_result) != 0) {
-         return -1;
+        return -1;
     }
 
     for (struct addrinfo *rp = addr_result; rp != NULL; rp = rp->ai_next) {
         int sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sfd == -1) {
-             continue;
+            continue;
         }
         if (connect(sfd, rp->ai_addr, rp->ai_addrlen) == 0) {
             freeaddrinfo(addr_result);
             return sfd;
         }
-         close(sfd);
+        close(sfd);
     }
     freeaddrinfo(addr_result);
     return -1;
@@ -144,12 +145,12 @@ int udp_socket() {
     int ttl_val = MULTICAST_UDP_TTL_VALUE;
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-         return -1;
+        return -1;
     }
 
     if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl_val, sizeof(ttl_val)) == -1
         || setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast_flag, sizeof(broadcast_flag)) == -1) {
-         close(sock);
+        close(sock);
         return -1;
     }
 
@@ -157,14 +158,14 @@ int udp_socket() {
     local_address.sin_addr.s_addr = htonl(INADDR_ANY);
     local_address.sin_port = htons(0);
     if (bind(sock, (struct sockaddr *) &local_address, sizeof(local_address)) == -1) {
-         close(sock);
+        close(sock);
         return -1;
     }
 
     remote_multicast_address.sin_family = AF_INET;
     remote_multicast_address.sin_port = htons((uint16_t) c_config.server_port);
     if (inet_aton(c_config.server_address.c_str(), &remote_multicast_address.sin_addr) == 0) {
-         close(sock);
+        close(sock);
         return -1;
     }
 
@@ -234,8 +235,8 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
     memcpy(simple.cmd, MSG_HEADER_HELLO, CMD_LEN);
     simple.cmd_seq = htobe64(seq);
 
-     if (!cmd_send(socket, &simple, (size_t) EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
-         return;
+    if (!cmd_send(socket, &simple, (size_t) EMPTY_SIMPL_CMD_SIZE, &remote_multicast_address)) {
+        return;
     }
 
     while ((rcvd = cmd_recvfrom_timed(socket, &complex, &server_address, &timeout)) != -1) {
@@ -251,30 +252,30 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
         uint64_t server_space = be64toh(complex.param);
 
         struct sockaddr_in unicast_addr;
-        if(inet_aton(unicast_ip.c_str(), &unicast_addr.sin_addr) == 1){
+        if (inet_aton(unicast_ip.c_str(), &unicast_addr.sin_addr) == 1) {
             unicast_addr.sin_port = htons(c_config.server_port);
             unicast_addr.sin_family = AF_INET;
             servers_available.push_back(std::make_pair(unicast_addr, server_space));
 
             printf(msg_server_list, unicast_ip.c_str(), multicast_ip.c_str(), server_space);
-        } else{
+        } else {
             printf(msg_pckg_error, inet_ntoa(server_address.sin_addr), ntohs(server_address.sin_port),
                    "unresolvable unicast address");
         }
     }
- }
+}
 
 void do_remove(int socket, struct command *cmd) {
     struct SIMPL_CMD simple;
 
     memcpy(simple.cmd, MSG_HEADER_DEL, CMD_LEN);
-    simple.cmd_seq = htobe64((uint64_t) rand());
+    simple.cmd_seq = htobe64((uint64_t) seq_counter++);
     snprintf(simple.data, SIMPL_CMD_DATA_SIZE, cmd->arg.c_str());
 
     if (!cmd_send(socket, &simple,
                   (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
                   &remote_multicast_address)) {
-     }
+    }
 }
 
 void
@@ -299,8 +300,8 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
         msg_size += std::min(SIMPL_CMD_DATA_SIZE, (int) cmd->arg.length());
     }
 
-     if (!cmd_send(socket, &simple, msg_size, &remote_multicast_address)) {
-         return;
+    if (!cmd_send(socket, &simple, msg_size, &remote_multicast_address)) {
+        return;
     }
 
     while ((rcvd = cmd_recvfrom_timed(socket, &simple, &server_address, &timeout)) != -1) {
@@ -525,20 +526,18 @@ int main(int argc, char *argv[]) {
                 case cmd_type::search_exp:
                     do_search(sock, &cmd, files_available);
                     break;
-                case cmd_type::fetch:
-                    {
-                        std::thread worker(do_fetch, sock, cmd, files_available);
-                        worker.detach();
-                    }
+                case cmd_type::fetch: {
+                    std::thread worker(do_fetch, sock, cmd, files_available);
+                    worker.detach();
+                }
                     if ((sock = udp_socket()) == -1) {
                         return 6;
                     }
                     break;
-                case cmd_type::upload:
-                    {
-                        std::thread worker(do_upload, sock, cmd, servers_available);
-                        worker.detach();
-                    }
+                case cmd_type::upload: {
+                    std::thread worker(do_upload, sock, cmd, servers_available);
+                    worker.detach();
+                }
                     if ((sock = udp_socket()) == -1) {
                         return 7;
                     }
