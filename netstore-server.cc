@@ -35,11 +35,8 @@ void work_send(int tcp_sock, int fd, size_t file_size) {
     FD_SET(tcp_sock, &rfds);
 
     if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1) {
-        //perror("select");
     } else if ((sock_fd = accept(tcp_sock, NULL, NULL)) == -1) {
-        //perror("accept");
     } else if (fdncpy(sock_fd, fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
-        //std::cerr << "fdncpy failed";
     }
 
     close(tcp_sock);
@@ -71,7 +68,6 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
             mutex_space.unlock();
         }
     } else {
-        //std::cout << "Upload succesful.\n";
         {
             mutex_files.lock();
             filenames.push_back(filename);
@@ -118,13 +114,11 @@ int udp_multicast_socket() {
     int enable_flag = 1;
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        //perror("socket");
         return -1;
     }
 
     ip_mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     if (inet_aton(s_config.server_address.c_str(), &ip_mreq.imr_multiaddr) == 0) {
-        //perror("inet_aton");
         close(sock);
         return -1;
     }
@@ -132,7 +126,6 @@ int udp_multicast_socket() {
     if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &ip_mreq, sizeof(ip_mreq)) == -1
         || setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &enable_flag, sizeof(enable_flag)) == -1
         || setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable_flag, sizeof(enable_flag)) == -1) {
-        //perror("setsockopt");
         close(sock);
         return -1;
     }
@@ -141,7 +134,6 @@ int udp_multicast_socket() {
     local_address.sin_addr.s_addr = htonl(INADDR_ANY);
     local_address.sin_port = htons((uint16_t) s_config.server_port);
     if (bind(sock, (struct sockaddr *) &local_address, sizeof(local_address)) < 0) {
-        //perror("bind");
         close(sock);
         return -1;
     }
@@ -158,21 +150,17 @@ int tcp_socket(struct sockaddr_in *tcp_address) {
     socklen_t sockaddr_size = sizeof(tcp_address);
 
     if ((tcp_sock = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
-        //perror("socket");
         return -1;
     }
     if (bind(tcp_sock, (sockaddr *) tcp_address, sizeof(*tcp_address)) == -1) {
-        //perror("bind");
         close(tcp_sock);
         return -1;
     }
     if (listen(tcp_sock, 1) == -1) {
-        //perror("listen");
         close(tcp_sock);
         return -1;
     }
     if (getsockname(tcp_sock, (sockaddr *) tcp_address, &sockaddr_size) == -1) {
-        //perror("getsockname");
         close(tcp_sock);
         return -1;
     }
@@ -317,7 +305,6 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len) {
     }
 
     if ((fd = open(filepath.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
-        //std::cerr << "File not found\n";
         return false;
     }
 
@@ -328,7 +315,6 @@ bool do_send(int sock, struct SIMPL_CMD *request, size_t req_len) {
     }
 
     if ((tcp_sock = tcp_socket(&tcp_address)) == -1) {
-        //std::cerr << "Couldn't create socket\n";
         close(fd);
         return false;
     }
@@ -382,12 +368,10 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
     }
 
     if ((fd = open(filepath.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
-        //std::cerr << "File already present\n";
         return false;
     }
 
     if ((tcp_sock = tcp_socket(&tcp_address)) == -1) {
-        //std::cerr << "Couldn't create socket\n";
         close(fd);
         unlink(filepath.c_str());
         return false;
@@ -469,40 +453,26 @@ int main(int argc, char *argv[]) {
     for (;;) {
         msg_len = cmd_recvfrom(sock, &buffer, &client_address);
         if (msg_len == -1) {
-            //perror("Recvfrom error\n");
             continue;
         }
-        //std::cout << "Message received\n";
         switch (parse_req_type(&buffer, msg_len)) {
             case req_type::hello:
-                if (!do_hello(sock, (struct SIMPL_CMD *) &buffer)) {
-                    //perror("Error replying to hello");
-                }
+                do_hello(sock, (struct SIMPL_CMD *) &buffer);
                 break;
             case req_type::remove:
-                if (!do_remove((struct SIMPL_CMD *) &buffer, msg_len)) {
-                    //perror("Error removing file");
-                }
+                do_remove((struct SIMPL_CMD *) &buffer, msg_len);
                 break;
             case req_type::list_all:
-                if (!do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, false)) {
-                    //perror("Error sending list");
-                }
+                do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, false);
                 break;
             case req_type::list_exp:
-                if (!do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, true)) {
-                    //perror("Error sending list");
-                }
+                do_list(sock, (struct SIMPL_CMD *) &buffer, msg_len, true);
                 break;
             case req_type::download:
-                if (!do_send(sock, (struct SIMPL_CMD *) &buffer, msg_len)) {
-                    //perror("Error starting file transmission to client");
-                }
+                do_send(sock, (struct SIMPL_CMD *) &buffer, msg_len);
                 break;
             case req_type::upload:
-                if (!do_receive(sock, (struct CMPLX_CMD *) &buffer, msg_len, filenames)) {
-                    //perror("Error starting file transmission from client");
-                }
+                do_receive(sock, (struct CMPLX_CMD *) &buffer, msg_len, filenames);
                 break;
             case req_type::invalid:
                 printf(msg_pckg_error, inet_ntoa(client_address.sin_addr), (int) ntohs(client_address.sin_port),
