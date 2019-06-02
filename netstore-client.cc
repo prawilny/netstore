@@ -323,7 +323,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
     //std::cout << "do_search() returns\n";
 }
 
-void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> files_available) {
+void do_fetch(int socket, struct command cmd, std::unordered_map<std::string, struct sockaddr_in> files_available) {
     struct SIMPL_CMD req;
     struct CMPLX_CMD res;
     struct timeval timeout;
@@ -331,17 +331,17 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     uint64_t seq;
     int fd = -1;
     int sfd = -1;
-    std::string filepath(c_config.download_folder + "/" + cmd->arg);
+    std::string filepath(c_config.download_folder + "/" + cmd.arg);
     std::filesystem::path file_node(filepath);
     ssize_t rcvd;
 
-    if (files_available.find(cmd->arg) == files_available.end()) {
-        printf(msg_downloading_failed_serverless, cmd->arg.c_str(), "file not among last search's results");
+    if (files_available.find(cmd.arg) == files_available.end()) {
+        printf(msg_downloading_failed_serverless, cmd.arg.c_str(), "file not among last search's results");
         close(socket);
         return;
     }
     if ((fd = open(filepath.c_str(), O_CREAT | O_EXCL | O_WRONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
-        printf(msg_downloading_failed_serverless, cmd->arg.c_str(),
+        printf(msg_downloading_failed_serverless, cmd.arg.c_str(),
                "couldn't open output file (exists already?)");
         close(socket);
         return;
@@ -349,18 +349,18 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
 
     bool connected = false;
     struct sockaddr_in sockaddr;
-    for (auto it = files_available.equal_range(cmd->arg).first;
-         !connected && it != files_available.equal_range(cmd->arg).second;
+    for (auto it = files_available.equal_range(cmd.arg).first;
+         !connected && it != files_available.equal_range(cmd.arg).second;
          it++) {
         seq = seq_counter++;
         sockaddr = it->second;
 
         memcpy(req.cmd, MSG_HEADER_GET, CMD_LEN);
         req.cmd_seq = htobe64(seq);
-        snprintf(req.data, CMPLX_CMD_DATA_SIZE, "%s", cmd->arg.c_str());
+        snprintf(req.data, CMPLX_CMD_DATA_SIZE, "%s", cmd.arg.c_str());
 
         if (!cmd_send(socket, &req,
-                      (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd->arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
+                      (size_t) EMPTY_SIMPL_CMD_SIZE + std::min(cmd.arg.length(), (size_t) SIMPL_CMD_DATA_SIZE),
                       &sockaddr)) {
             continue;
         }
@@ -372,7 +372,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
         while (!server_replied && (rcvd = cmd_recvfrom_timed(socket, &res, &sockaddr, &timeout)) != -1) {
             if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(res.cmd_seq) != seq
                 || memcmp(res.cmd, MSG_HEADER_CONNECT_ME, CMD_LEN) != 0
-                || memcmp(cmd->arg.c_str(), res.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
+                || memcmp(cmd.arg.c_str(), res.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
                 if (rcvd != -1) {
                     printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
                            "wrong message metadata (waiting for server port for download)");
@@ -396,7 +396,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
                            sockaddr.sin_port);
         worker.detach();
     } else {
-        printf(msg_downloading_failed_serverless, cmd->arg.c_str(),
+        printf(msg_downloading_failed_serverless, cmd.arg.c_str(),
                "couldn't connect any server hosting the file");
 
         unlink(file_node.c_str());
@@ -406,7 +406,7 @@ void do_fetch(int socket, struct command *cmd, std::unordered_map<std::string, s
     close(socket);
 }
 
-void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in, uint64_t>> servers_available) {
+void do_upload(int sock, command cmd, std::vector<std::pair<struct sockaddr_in, uint64_t>> servers_available) {
     std::sort(servers_available.begin(), servers_available.end(), [](auto &left, auto &right) {
         return left.second < right.second;
     });
@@ -417,14 +417,14 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
     ssize_t rcvd;
 
     //todo fix relative path open()
-    if ((fd = open(cmd->arg.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
-        printf(msg_file_nonexistent, cmd->arg.c_str());
+    if ((fd = open(cmd.arg.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO)) == -1) {
+        printf(msg_file_nonexistent, cmd.arg.c_str());
         close(sock);
         return;
     }
 
     std::error_code ec;
-    std::filesystem::path file_node(cmd->arg);
+    std::filesystem::path file_node(cmd.arg);
     std::string filename = file_node.filename();
     size_t filename_length = std::min(filename.length(), (size_t) CMPLX_CMD_DATA_SIZE);
     uint64_t filesize = std::filesystem::file_size(file_node, ec);
@@ -468,7 +468,7 @@ void do_upload(int sock, command *cmd, std::vector<std::pair<struct sockaddr_in,
                 break;
             } else if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(msg.cmd_seq) != seq
                        || memcmp(msg.cmd, MSG_HEADER_CAN_ADD, CMD_LEN) != 0
-                       || memcmp(cmd->arg.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
+                       || memcmp(cmd.arg.c_str(), msg.data, rcvd - EMPTY_CMPLX_CMD_SIZE) != 0) {
                 if (rcvd != -1) {
                     printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
                            "wrong message metadata (waiting for server port for upload)");
@@ -531,7 +531,7 @@ int main(int argc, char *argv[]) {
                     do_search(sock, &cmd, files_available);
                     break;
                 case cmd_type::fetch: {
-                    std::thread worker(do_fetch, sock, &cmd, files_available);
+                    std::thread worker(do_fetch, sock, cmd, files_available);
                     worker.detach();
                 }
                     if ((sock = udp_socket()) == -1) {
@@ -539,7 +539,7 @@ int main(int argc, char *argv[]) {
                     }
                     break;
                 case cmd_type::upload: {
-                    std::thread worker(do_upload, sock, &cmd, servers_available);
+                    std::thread worker(do_upload, sock, cmd, servers_available);
                     worker.detach();
                 }
                     if ((sock = udp_socket()) == -1) {
