@@ -43,7 +43,7 @@ namespace netstore {
         return;
     }
 
-    void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) {
+    void work_receive(int tcp_sock, int fd, size_t file_size, std::string filename) {
         char buffer[TCP_BUFFER_SIZE];
         struct timeval timeout;
         int sock_fd = -1;
@@ -388,7 +388,7 @@ namespace netstore {
         }
         bool msg_sent = cmd_send(sock, &response, req_len, &client_address);
 
-        std::thread worker(work_receive, tcp_sock, fd, file_size, filename.c_str());
+        std::thread worker(work_receive, tcp_sock, fd, file_size, filename);
         worker.detach();
 
         return msg_sent;
