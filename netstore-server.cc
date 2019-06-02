@@ -61,21 +61,6 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
     FD_ZERO(&rfds);
     FD_SET(tcp_sock, &rfds);
 
-    /*if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1) {
-        //perror("select");
-        unlink(file_node.c_str());
-    } else if ((sock_fd = accept(tcp_sock, NULL, NULL)) == -1) {
-        //perror("accept");
-        unlink(file_node.c_str());
-    } else if (fdncpy(fd, sock_fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
-        //std::cerr << "fdncpy failed";
-        unlink(file_node.c_str());
-        {
-            mutex_space.lock();
-            s_config.free_space += file_size;
-            mutex_space.unlock();
-        }
-    } */
     if (select(tcp_sock + 1, &rfds, NULL, NULL, &timeout) != 1
         || (sock_fd = accept(tcp_sock, NULL, NULL)) == -1
         || fdncpy(fd, sock_fd, file_size, buffer, TCP_BUFFER_SIZE) == -1) {
