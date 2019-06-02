@@ -278,7 +278,7 @@ void do_remove(int socket, struct command *cmd) {
 }
 
 void
-do_search(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> files_available) {
+do_search(int socket, struct command *cmd, std::unordered_map<std::string, struct sockaddr_in> &files_available) {
     uint64_t seq = seq_counter++;
     struct SIMPL_CMD simple;
     struct sockaddr_in server_address;
@@ -530,18 +530,20 @@ int main(int argc, char *argv[]) {
                 case cmd_type::search_exp:
                     do_search(sock, &cmd, files_available);
                     break;
-                case cmd_type::fetch: {
-                    std::thread worker(do_fetch, sock, cmd, files_available);
-                    worker.detach();
-                }
+                case cmd_type::fetch:
+                    {
+                        std::thread worker(do_fetch, sock, cmd, files_available);
+                        worker.detach();
+                    }
                     if ((sock = udp_socket()) == -1) {
                         return 6;
                     }
                     break;
-                case cmd_type::upload: {
-                    std::thread worker(do_upload, sock, cmd, servers_available);
-                    worker.detach();
-                }
+                case cmd_type::upload:
+                    {
+                        std::thread worker(do_upload, sock, cmd, servers_available);
+                        worker.detach();
+                    }
                     if ((sock = udp_socket()) == -1) {
                         return 7;
                     }
