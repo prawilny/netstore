@@ -388,7 +388,7 @@ namespace netstore {
         }
 
         if (connected) {
-            work_download(sfd, fd, file_node, std::string(inet_ntoa(sockaddr.sin_addr)), sockaddr.sin_port);
+            work_download(sfd, fd, file_node, std::string(inet_ntoa(sockaddr.sin_addr)), ntohs(sockaddr.sin_port));
         } else {
             printf(msg_downloading_failed_serverless, cmd.arg.c_str(),
                    "couldn't connect to any server hosting the file");
@@ -480,7 +480,8 @@ namespace netstore {
         }
 
         if (connected) {
-            work_upload(sfd, fd, filesize, filename, std::string(inet_ntoa(sockaddr.sin_addr)), sockaddr.sin_port);
+            work_upload(sfd, fd, filesize, filename, std::string(inet_ntoa(sockaddr.sin_addr)),
+                        ntohs(sockaddr.sin_port));
         } else {
             printf(msg_file_too_big, filename.c_str());
             close(sfd);
