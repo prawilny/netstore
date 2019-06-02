@@ -1,4 +1,5 @@
 #include "netstore-boost.h"
+#include <filesystem>
 
 static constexpr int DEFAULT_TIMEOUT = 5;
 static constexpr int MAX_TIMEOUT = 300;
@@ -42,6 +43,9 @@ bool parse_client_args(int argc, char **argv) {
         if (c_config.timeout <= 0 || MAX_TIMEOUT < c_config.timeout) {
             throw std::invalid_argument("Timeout is not valid");
         }
+        if (!std::filesystem::is_directory(std::filesystem::path(c_config.download_folder))) {
+            throw std::invalid_argument("Download folder does not exist");
+        }
     }
     catch (std::exception &e) {
         std::cerr << "error: " << e.what() << "\n";
@@ -62,7 +66,7 @@ bool parse_server_args(int argc, char **argv) {
                 (",f", po::value<std::string>(&s_config.shared_folder)->required(), "shared folder")
                 (",t", po::value<int>(&s_config.timeout)->default_value(DEFAULT_TIMEOUT),
                  "timeout for client connections")
-                (",b", po::value<uint64_t>(&s_config.free_space)->default_value(DEFAULT_SERVER_FREE),
+                (",b", po::value<int64_t>(&s_config.free_space)->default_value(DEFAULT_SERVER_FREE),
                  "shared folder max size");
 
         po::variables_map vm;
@@ -84,6 +88,9 @@ bool parse_server_args(int argc, char **argv) {
         }
         if (s_config.timeout <= 0 || MAX_TIMEOUT < s_config.timeout) {
             throw std::invalid_argument("Timeout is not valid");
+        }
+        if (!std::filesystem::is_directory(std::filesystem::path(s_config.shared_folder))) {
+            throw std::invalid_argument("Shared folder does not exist");
         }
     }
     catch (std::exception &e) {

@@ -10,7 +10,7 @@ struct server_config {
     std::string server_address;
     int server_port;
     std::string shared_folder;
-    uint64_t free_space;
+    int64_t free_space;
     int timeout;
 };
 

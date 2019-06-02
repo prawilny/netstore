@@ -82,7 +82,7 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
         unlink(file_node.c_str());
         {
             mutex_space.lock();
-            s_config.free_space += file_size;
+            s_config.free_space += (int64_t) file_size;
             mutex_space.unlock();
         }
     } else {
@@ -102,28 +102,26 @@ void work_receive(int tcp_sock, int fd, size_t file_size, const char *filename) 
 
 bool index_files(std::vector<std::string> &names) {
     std::filesystem::path dir(s_config.shared_folder);
+    std::error_code ec;
 
-    if (!std::filesystem::is_directory(dir)) {
+    if (!std::filesystem::is_directory(dir, ec) || ec) {
         return false;
     }
 
     const std::filesystem::directory_iterator end{};
     try {
         for (std::filesystem::directory_iterator iter{dir}; iter != end; ++iter) {
-            if (std::filesystem::is_regular_file(*iter)
+            if (std::filesystem::is_regular_file(*iter, ec) && !ec
                 && iter->path().filename().string().length() < CMPLX_CMD_DATA_SIZE) {
                 names.push_back(iter->path().filename());
-                uint64_t f_size = iter->file_size();
-                if (f_size > s_config.free_space) {
-                    //std::cerr << "Shared folder's size exceeds limit\n";
-                    return false;
+                uint64_t f_size = iter->file_size(ec);
+                if (!ec) {
+                    s_config.free_space -= (int64_t) f_size;
                 }
-                s_config.free_space -= f_size;
             }
         }
     }
     catch (std::exception &e) {
-        //std::cerr << "filesystem error while indexing: " << e.what() << "\n";
         return false;
     }
     return true;
@@ -132,6 +130,7 @@ bool index_files(std::vector<std::string> &names) {
 int udp_multicast_socket() {
     int sock = -1;
     struct ip_mreq ip_mreq;
+    int enable_flag = 1;
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
         //perror("socket");
@@ -145,7 +144,9 @@ int udp_multicast_socket() {
         return -1;
     }
 
-    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &ip_mreq, sizeof(ip_mreq)) == -1) {
+    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &ip_mreq, sizeof(ip_mreq)) == -1
+        || setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &enable_flag, sizeof(enable_flag)) == -1
+        || setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable_flag, sizeof(enable_flag)) == -1) {
         //perror("setsockopt");
         close(sock);
         return -1;
@@ -198,7 +199,7 @@ bool do_hello(int sock, struct SIMPL_CMD *request) {
 
     memcpy(reply.cmd, MSG_HEADER_GOOD_DAY, CMD_LEN);
     reply.cmd_seq = request->cmd_seq;
-    reply.param = htobe64(s_config.free_space);
+    reply.param = htobe64(s_config.free_space < 0 ? 0 : s_config.free_space);
 
     return cmd_send(sock, &reply, EMPTY_CMPLX_CMD_SIZE, &client_address);
 }
@@ -217,7 +218,8 @@ bool do_remove(struct SIMPL_CMD *request, size_t req_len) {
     {
         mutex_files.lock();
         auto file_pos = std::find(filenames.begin(), filenames.end(), filename);
-        bool file_to_delete = (filename.find('/') == std::string::npos && std::filesystem::is_regular_file(file)
+        bool file_to_delete = (filename.find('/') == std::string::npos
+                               && std::filesystem::is_regular_file(file, ec) && !ec
                                && file_pos != filenames.end());
         if (file_to_delete) {
             filenames.erase(file_pos);
@@ -376,7 +378,8 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
     std::string filepath(s_config.shared_folder + '/' + filename);
     file_size = be64toh(request->param);
 
-    if (file_size > s_config.free_space || filename.find('/') != std::string::npos || filename.length() == 0) {
+    if ((int64_t) file_size > s_config.free_space || filename.find('/') != std::string::npos
+        || filename.length() == 0) {
         memcpy(no_way.cmd, MSG_HEADER_NO_WAY, CMD_LEN);
         no_way.cmd_seq = request->cmd_seq;
         return cmd_send(sock, &no_way, EMPTY_SIMPL_CMD_SIZE, &client_address);
@@ -412,7 +415,7 @@ bool do_receive(int sock, struct CMPLX_CMD *request, size_t req_len, std::vector
 
     {
         mutex_space.lock();
-        s_config.free_space -= file_size;
+        s_config.free_space -= (int64_t) file_size;
         mutex_space.unlock();
     }
     bool msg_sent = cmd_send(sock, &response, req_len, &client_address);
@@ -448,6 +451,8 @@ req_type parse_req_type(struct BUF_CMD *buf, ssize_t msg_len) {
 }
 
 void sigint_handler(int signal) {
+    (void) signal;
+
     for (int i = 3; i <= MAX_FDS_OPEN; i++) {
         close(i);
     }

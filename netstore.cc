@@ -6,7 +6,7 @@ static_assert(sizeof(CMPLX_CMD) == UDP_DATA_SIZE);
 static_assert(sizeof(BUF_CMD) == UDP_DATA_SIZE);
 
 bool cmd_send(int socket, void *cmd, size_t msg_len, struct sockaddr_in *address) {
-    return sendto(socket, cmd, msg_len, 0, (const sockaddr *) address, sizeof(*address)) == msg_len;
+    return sendto(socket, cmd, msg_len, 0, (const sockaddr *) address, sizeof(*address)) == (ssize_t) msg_len;
 }
 
 ssize_t cmd_recvfrom(int sock, void *buffer, struct sockaddr_in *from) {
