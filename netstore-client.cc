@@ -263,7 +263,7 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
 
         struct sockaddr_in unicast_addr;
         if(inet_aton(unicast_ip.c_str(), &unicast_addr.sin_addr) == 1){
-            unicast_addr.sin_port = htons(0);
+            unicast_addr.sin_port = htons(c_config.server_port);
             unicast_addr.sin_family = AF_INET;
             servers_available.push_back(std::make_pair(unicast_addr, server_space));
 
