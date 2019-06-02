@@ -269,7 +269,7 @@ bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, bool filtered)
         }
 
         if (left_space <= filename_len) {
-            if (!cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address)) {
+            if (!cmd_send(sock, &reply, UDP_DATA_SIZE - left_space - 1, &client_address)) {
                 return false;
             }
             left_space = SIMPL_CMD_DATA_SIZE;
@@ -282,7 +282,7 @@ bool do_list(int sock, struct SIMPL_CMD *request, size_t req_len, bool filtered)
             it++;
         }
         if (it == filenames_local.end()) {
-            return cmd_send(sock, &reply, UDP_DATA_SIZE - left_space, &client_address);
+            return cmd_send(sock, &reply, UDP_DATA_SIZE - left_space - 1, &client_address);
         }
     }
 

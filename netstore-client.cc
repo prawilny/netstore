@@ -328,7 +328,7 @@ do_search(int socket, struct command *cmd, std::unordered_map<std::string, struc
         }
 
         simple.data[rcvd - EMPTY_SIMPL_CMD_SIZE] = '\0';
-        for (char *token = strtok(simple.data, "\n"); token != NULL; token = strtok(NULL, "\n")) {
+        for (char *token = strtok(simple.data, "\n\0"); token != NULL; token = strtok(NULL, "\n")) {
             printf(msg_file_list, token, inet_ntoa(server_address.sin_addr));
             files_available.insert(std::make_pair(token, server_address));
         }
