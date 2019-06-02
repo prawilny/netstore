@@ -250,15 +250,28 @@ void do_discover(int socket, std::vector<std::pair<struct sockaddr_in, uint64_t>
     //std::cout << "HELLO sent\n";
 
     while ((rcvd = cmd_recvfrom_timed(socket, &complex, &server_address, &timeout)) != -1) {
-        if (be64toh(complex.cmd_seq) != seq || memcmp(MSG_HEADER_GOOD_DAY, complex.cmd, CMD_LEN) != 0) {
+        if (rcvd <= EMPTY_CMPLX_CMD_SIZE || be64toh(complex.cmd_seq) != seq
+            || memcmp(MSG_HEADER_GOOD_DAY, complex.cmd, CMD_LEN) != 0) {
             printf(msg_pckg_error, inet_ntoa(server_address.sin_addr), ntohs(server_address.sin_port),
                    "wrong message metadata (waiting for server address and free space)");
         }
-        std::string server_ip(inet_ntoa(server_address.sin_addr));
-        uint64_t server_space = be64toh(complex.param);
-        servers_available.push_back(std::make_pair(server_address, server_space));
 
-        printf(msg_server_list, server_ip.c_str(), c_config.server_address.c_str(), server_space);
+        complex.data[rcvd - EMPTY_CMPLX_CMD_SIZE] = '\0';
+        std::string unicast_ip(inet_ntoa(server_address.sin_addr));
+        std::string multicast_ip(complex.data);
+        uint64_t server_space = be64toh(complex.param);
+
+        struct sockaddr_in unicast_addr;
+        if(inet_aton(unicast_ip.c_str(), &unicast_addr.sin_addr) == 1){
+            unicast_addr.sin_port = htons(0);
+            unicast_addr.sin_family = AF_INET;
+            servers_available.push_back(std::make_pair(unicast_addr, server_space));
+
+            printf(msg_server_list, unicast_ip.c_str(), multicast_ip.c_str(), server_space);
+        } else{
+            printf(msg_pckg_error, inet_ntoa(server_address.sin_addr), ntohs(server_address.sin_port),
+                   "unresolvable unicast address");
+        }
     }
     //std::cout << "do_discover() returns\n";
 }
@@ -473,7 +486,7 @@ void do_upload(int sock, command cmd, std::vector<std::pair<struct sockaddr_in, 
                     printf(msg_pckg_error, inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port),
                            "wrong message metadata (waiting for server port for upload)");
                 }
-            } else{
+            } else {
                 port_received = true;
             }
         }
@@ -530,20 +543,18 @@ int main(int argc, char *argv[]) {
                 case cmd_type::search_exp:
                     do_search(sock, &cmd, files_available);
                     break;
-                case cmd_type::fetch:
-                    {
-                        std::thread worker(do_fetch, sock, cmd, files_available);
-                        worker.detach();
-                    }
+                case cmd_type::fetch: {
+                    std::thread worker(do_fetch, sock, cmd, files_available);
+                    worker.detach();
+                }
                     if ((sock = udp_socket()) == -1) {
                         return 6;
                     }
                     break;
-                case cmd_type::upload:
-                    {
-                        std::thread worker(do_upload, sock, cmd, servers_available);
-                        worker.detach();
-                    }
+                case cmd_type::upload: {
+                    std::thread worker(do_upload, sock, cmd, servers_available);
+                    worker.detach();
+                }
                     if ((sock = udp_socket()) == -1) {
                         return 7;
                     }

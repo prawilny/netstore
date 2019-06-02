@@ -185,8 +185,9 @@ bool do_hello(int sock, struct SIMPL_CMD *request) {
     memcpy(reply.cmd, MSG_HEADER_GOOD_DAY, CMD_LEN);
     reply.cmd_seq = request->cmd_seq;
     reply.param = htobe64(s_config.free_space < 0 ? 0 : s_config.free_space);
+    sprintf(reply.data, "%s", s_config.server_address.c_str());
 
-    return cmd_send(sock, &reply, EMPTY_CMPLX_CMD_SIZE, &client_address);
+    return cmd_send(sock, &reply, EMPTY_CMPLX_CMD_SIZE + s_config.server_address.length(), &client_address);
 }
 
 bool do_remove(struct SIMPL_CMD *request, size_t req_len) {
