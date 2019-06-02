@@ -1,4 +1,4 @@
-CXXFLAGS+= -Wall -Wextra -std=c++17 -g #-O2
+CXXFLAGS+= -Wall -Wextra -std=c++17 -O2
 LDLIBS= -lstdc++ -lstdc++fs -lboost_program_options -lpthread
 
 all: netstore-client netstore-server
