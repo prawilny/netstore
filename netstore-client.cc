@@ -455,7 +455,7 @@ void do_upload(int sock, command cmd, std::vector<std::pair<struct sockaddr_in, 
         struct timeval timeout;
 
         seq = seq_counter++;
-        struct sockaddr_in sockaddr = it->first;
+        sockaddr = it->first;
 
         memcpy(msg.cmd, MSG_HEADER_ADD, CMD_LEN);
         msg.cmd_seq = htobe64(seq);
